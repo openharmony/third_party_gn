@@ -64,6 +64,8 @@ Note:If the text contains special characters, please escape them according to th
 		<filefilterlist>
 			<filefilter name="defaultPolicyFilter" desc="Filters for compatibility，license header policies">
 				<filteritem type="filepath" name="src/base/third_party/icu/README.chromium"/>
+				<filteritem type="filepath" name="src/base/third_party/icu/icu_utf.cc" desc="Unicode-TOU 兼容license"/>
+				<filteritem type="filepath" name="src/base/third_party/icu/icu_utf.h" desc="Unicode-TOU 兼容license"/>
 			</filefilter>
 		</filefilterlist>
     </oatconfig>
