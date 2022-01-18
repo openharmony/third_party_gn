@@ -1,0 +1,30 @@
+{
+    "name": "@ohos/gn",
+    "description": "GN is a meta-build system that generates build files for Ninja.",
+    "version": "3.1",
+    "license": "BSD-style",
+    "publishAs": "code-segment",
+    "segment": {
+        "destPath": "third_party/gn"
+    },
+    "dirs": {},
+    "scripts": {},
+    "component": {
+        "name": "thirdparty_gn",
+        "subsystem": "",
+        "syscap": [],
+        "features": [],
+        "adapted_system_type": [],
+        "rom": "",
+        "ram": "",
+        "deps": {
+            "components": [],
+            "third_party": []
+        },
+        "build": {
+            "sub_component": [],
+            "inner_kits": [],
+            "test": []
+        }
+    }
+}
