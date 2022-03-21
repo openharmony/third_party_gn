@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Copyright (c) 2021 Huawei Device Co., Ltd.
-
      Licensed under the Apache License, Version 2.0 (the "License");
      you may not use this file except in compliance with the License.
      You may obtain a copy of the License at
@@ -14,7 +13,7 @@
      limitations under the License.
 
 	 Notes:
-	 This is project config file for OpenHarmony OSS Audit Tool, if you have any questions or concerns, please email chenyaxun.
+	 This is project config file for OpenHarmony OSS Audit Tool, if you have any questions or concerns, please consult OpenHarmony community or propose issues.
 -->
 <!-- OAT(OSS Audit Tool) configuration guide:
 basedir: Root dir, the basedir + project path is the real source file location.
