@@ -13,11 +13,11 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "gn/input_file.h"
 #include "gn/parse_tree.h"
 #include "gn/settings.h"
+#include "gn/vector_utils.h"
 #include "util/auto_reset_event.h"
 
 class BuildSettings;
@@ -36,9 +36,13 @@ class Token;
 // various state points into them.
 class InputFileManager : public base::RefCountedThreadSafe<InputFileManager> {
  public:
-  // Callback issued when a file is laoded. On auccess, the parse node will
+  // Callback issued when a file is loaded. On auccess, the parse node will
   // refer to the root block of the file. On failure, this will be NULL.
   using FileLoadCallback = std::function<void(const ParseNode*)>;
+
+  // Callback to emulate SyncLoadFile in tests.
+  using SyncLoadFileCallback =
+      std::function<bool(const SourceFile& file_name, InputFile* file)>;
 
   InputFileManager();
 
@@ -87,8 +91,20 @@ class InputFileManager : public base::RefCountedThreadSafe<InputFileManager> {
   // Does not count dynamic input.
   int GetInputFileCount() const;
 
-  // Fills the vector with all input files.
-  void GetAllPhysicalInputFileNames(std::vector<base::FilePath>* result) const;
+  // Add all physical input files to a VectorSetSorter instance.
+  // This allows fast merging and sorting with other file paths sets.
+  //
+  // This is more memory efficient than returning a vector of base::FilePath
+  // instance, especially with projects with a very large number of input files,
+  // but note that the VectorSetSorter only holds pointers to the
+  // items recorded in this InputFileManager instance, and it is up to the
+  // caller to ensure these will not change until the sorter is destroyed.
+  void AddAllPhysicalInputFileNamesToVectorSetSorter(
+      VectorSetSorter<base::FilePath>* sorter) const;
+
+  void set_load_file_callback(SyncLoadFileCallback load_file_callback) {
+    load_file_callback_ = load_file_callback;
+  }
 
  private:
   friend class base::RefCountedThreadSafe<InputFileManager>;
@@ -149,7 +165,11 @@ class InputFileManager : public base::RefCountedThreadSafe<InputFileManager> {
   // See AddDynamicInput().
   std::vector<std::unique_ptr<InputFileData>> dynamic_inputs_;
 
-  DISALLOW_COPY_AND_ASSIGN(InputFileManager);
+  // Used by unit tests to mock out SyncLoadFile().
+  SyncLoadFileCallback load_file_callback_;
+
+  InputFileManager(const InputFileManager&) = delete;
+  InputFileManager& operator=(const InputFileManager&) = delete;
 };
 
 #endif  // TOOLS_GN_INPUT_FILE_MANAGER_H_

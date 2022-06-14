@@ -5,16 +5,16 @@
 #include "gn/variables.h"
 
 #include "gn/rust_variables.h"
+#include "gn/swift_variables.h"
 
 namespace variables {
 
 // Built-in variables ----------------------------------------------------------
 
 const char kGnVersion[] = "gn_version";
-const char kGnVersion_HelpShort[] =
-    "gn_version: [number] The version of gn.";
+const char kGnVersion_HelpShort[] = "gn_version: [number] The version of gn.";
 const char kGnVersion_Help[] =
-  R"(gn_version: [number] The version of gn.
+    R"(gn_version: [number] The version of gn.
 
   Corresponds to the number printed by `gn --version`.
 
@@ -32,7 +32,7 @@ const char kHostCpu_Help[] =
   This is value is exposed so that cross-compile toolchains can access the host
   architecture when needed.
 
-  The value should generally be considered read-only, but it can be overriden
+  The value should generally be considered read-only, but it can be overridden
   in order to handle unusual cases where there might be multiple plausible
   values for the host architecture (e.g., if you can do either 32-bit or 64-bit
   builds). The value is not used internally by GN for any purpose.
@@ -124,6 +124,13 @@ Possible values
   - "arm"
   - "arm64"
   - "mipsel"
+  - "mips64el"
+  - "s390x"
+  - "ppc64"
+  - "riscv32"
+  - "riscv64"
+  - "e2k"
+  - "loong64"
 )";
 
 const char kTargetName[] = "target_name";
@@ -366,7 +373,7 @@ Example
 
   action("myscript") {
     # Pass the generated output dir to the script.
-    args = [ "-o", rebase_path(target_gen_dir, root_build_dir) ]"
+    args = [ "-o", rebase_path(target_gen_dir, root_build_dir) ]
   }
 )";
 
@@ -391,7 +398,7 @@ Example
 
   action("myscript") {
     # Pass the output dir to the script.
-    args = [ "-o", rebase_path(target_out_dir, root_build_dir) ]"
+    args = [ "-o", rebase_path(target_out_dir, root_build_dir) ]
   }
 )";
 
@@ -410,7 +417,7 @@ Example
   "     those configs appear in the list.\n"                                 \
   "  5. all_dependent_configs pulled from dependencies, in the order of\n"   \
   "     the \"deps\" list. This is done recursively. If a config appears\n"  \
-  "     more than once, only the first occurence will be used.\n"            \
+  "     more than once, only the first occurrence will be used.\n"           \
   "  6. public_configs pulled from dependencies, in the order of the\n"      \
   "     \"deps\" list. If a dependency is public, they will be applied\n"    \
   "     recursively.\n"
@@ -508,6 +515,23 @@ Example
   }
 )";
 
+const char kGenDeps[] = "gen_deps";
+const char kGenDeps_HelpShort[] =
+    "gen_deps: [label list] "
+    "Declares targets that should generate when this one does.";
+const char kGenDeps_Help[] =
+    R"(gen_deps: Declares targets that should generate when this one does.
+
+  A list of target labels.
+
+  Not all GN targets that get evaluated are actually turned into ninja targets
+  (see "gn help execution"). If this target is generated, then any targets in
+  the "gen_deps" list will also be generated, regardless of the usual critera.
+
+  Since "gen_deps" are not build time dependencies, there can be cycles between
+  "deps" and "gen_deps" or within "gen_deps" itself.
+)";
+
 const char kArflags[] = "arflags";
 const char kArflags_HelpShort[] =
     "arflags: [string list] Arguments passed to static_library archiver.";
@@ -536,6 +560,14 @@ const char kArgs_Help[] =
   For action and action_foreach targets, args is the list of arguments to pass
   to the script. Typically you would use source expansion (see "gn help
   source_expansion") to insert the source file names.
+
+  Args can also expand the substitution patterns corresponding to config
+  variables in the same way that compiler tools (see "gn help tool") do. These
+  allow actions that run compiler or compiler-like tools to access the results
+  of propagating configs through the build graph. For example:
+
+  args = [ "{{defines}}", "{{include_dirs}}", "{{rustenv}}", "--input-file",
+           "{{source}}" ]
 
   See also "gn help action" and "gn help action_foreach".
 )";
@@ -698,6 +730,19 @@ const char kBundleExecutableDir_Help[] =
   See "gn help bundle_root_dir" for examples.
 )";
 
+const char kXcassetCompilerFlags[] = "xcasset_compiler_flags";
+const char kXcassetCompilerFlags_HelpShort[] =
+    "xcasset_compiler_flags: [string list] Flags passed to xcassets compiler";
+const char kXcassetCompilerFlags_Help[] =
+    R"(xcasset_compiler_flags: Flags passed to xcassets compiler.
+
+  A list of strings.
+
+  Valid for create_bundle target. Those flags are directly passed to
+  xcassets compiler, corresponding to {{xcasset_compiler_flags}} substitution
+  in compile_xcassets tool.
+)";
+
 const char kCflags[] = "cflags";
 const char kCflags_HelpShort[] =
     "cflags: [string list] Flags passed to all C compiler variants.";
@@ -714,7 +759,8 @@ const char kCommonCflagsHelp[] =
   versions of cflags* will be appended on the compiler command line after
   "cflags".
 
-  See also "asmflags" for flags for assembly-language files.
+  See also "asmflags" for flags for assembly-language files and "swiftflags"
+  for swift files.
 )" COMMON_ORDERING_HELP;
 const char* kCflags_Help = kCommonCflagsHelp;
 
@@ -1049,7 +1095,7 @@ const char kDepfile_Help[] =
   The .d file should go in the target output directory. If you have more than
   one source file that the script is being run over, you can use the output
   file expansions described in "gn help action_foreach" to name the .d file
-  according to the input."
+  according to the input.
 
   The format is that of a Makefile and all paths must be relative to the root
   build directory. Only one output may be listed and it must match the first
@@ -1395,12 +1441,6 @@ Types of libs
       "lib_dirs" so the given library is found. Your BUILD.gn file should not
       specify the switch (like "-l"): this will be encoded in the "lib_switch"
       of the tool.
-
-  Apple frameworks
-      System libraries ending in ".framework" will be special-cased: the switch
-      "-framework" will be prepended instead of the lib_switch, and the
-      ".framework" suffix will be trimmed. This is to support the way Mac links
-      framework dependencies.
 )" COMMON_ORDERING_HELP LIBS_AND_LIB_DIRS_ORDERING_HELP
     R"(
 Examples
@@ -1422,7 +1462,7 @@ const char kMetadata_Help[] =
   Generally, these keys will include three types of lists: lists of ordinary
   strings, lists of filenames intended to be rebased according to their
   particular source directory, and lists of target labels intended to be used
-  as barriers to the walk. Verfication of these categories occurs at walk time,
+  as barriers to the walk. Verification of these categories occurs at walk time,
   not creation time (since it is not clear until the walk which values are
   intended for which purpose).
 
@@ -1791,7 +1831,7 @@ const char kPublicConfigs_Help[] =
 Propagation of public configs
 
   Public configs are applied to all targets that depend directly on this one.
-  These dependant targets can further push this target's public configs
+  These dependent targets can further push this target's public configs
   higher in the dependency tree by depending on it via public_deps (see "gn
   help public_deps").
 
@@ -2010,6 +2050,18 @@ Sources for non-binary targets
     The source are the source files to copy.
 )";
 
+const char kSwiftflags[] = "swiftflags";
+const char kSwiftflags_HelpShort[] =
+    "swiftflags: [string list] Flags passed to the swift compiler.";
+const char* kSwiftflags_Help =
+    R"(swiftflags: Flags passed to the swift compiler.
+
+  A list of strings.
+
+  "swiftflags" are passed to any invocation of a tool that takes an .swift
+  file as input.
+)" COMMON_ORDERING_HELP;
+
 const char kXcodeTestApplicationName[] = "xcode_test_application_name";
 const char kXcodeTestApplicationName_HelpShort[] =
     "xcode_test_application_name: [string] Name for Xcode test target.";
@@ -2127,6 +2179,27 @@ const char kWalkKeys_Help[] =
   See "gn help generated_file".
 )";
 
+const char kWeakFrameworks[] = "weak_frameworks";
+const char kWeakFrameworks_HelpShort[] =
+    "weak_frameworks: [name list] Name of frameworks that must be weak linked.";
+const char kWeakFrameworks_Help[] =
+    R"(weak_frameworks: [name list] Name of frameworks that must be weak linked.
+
+  A list of framework names.
+
+  The frameworks named in that list will be weak linked with any dynamic link
+  type target. Weak linking instructs the dynamic loader to attempt to load
+  the framework, but if it is not able to do so, it leaves any imported symbols
+  unresolved. This is typically used when a framework is present in a new
+  version of an SDK but not on older versions of the OS that the software runs
+  on.
+)" COMMON_ORDERING_HELP
+    R"(
+Example
+
+  weak_frameworks = [ "OnlyOnNewerOSes.framework" ]
+)";
+
 const char kWriteValueContents[] = "contents";
 const char kWriteValueContents_HelpShort[] =
     "contents: Contents to write to file.";
@@ -2144,7 +2217,7 @@ const char kWriteOutputConversion_Help[] =
     R"(output_conversion: Data format for generated_file targets.
 
   Controls how the "contents" of a generated_file target is formatted.
-  See "gn help io_conversion".
+  See `gn help io_conversion`.
 )";
 
 const char kWriteRuntimeDeps[] = "write_runtime_deps";
@@ -2223,6 +2296,7 @@ const VariableInfoMap& GetTargetVariables() {
   if (info_map.empty()) {
     INSERT_VARIABLE(AllDependentConfigs)
     INSERT_VARIABLE(AllowCircularIncludesFrom)
+    INSERT_VARIABLE(GenDeps)
     INSERT_VARIABLE(Arflags)
     INSERT_VARIABLE(Args)
     INSERT_VARIABLE(Asmflags)
@@ -2232,6 +2306,7 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(BundleResourcesDir)
     INSERT_VARIABLE(BundleDepsFilter)
     INSERT_VARIABLE(BundleExecutableDir)
+    INSERT_VARIABLE(XcassetCompilerFlags)
     INSERT_VARIABLE(Cflags)
     INSERT_VARIABLE(CflagsC)
     INSERT_VARIABLE(CflagsCC)
@@ -2278,15 +2353,18 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(ResponseFileContents)
     INSERT_VARIABLE(Script)
     INSERT_VARIABLE(Sources)
+    INSERT_VARIABLE(Swiftflags)
     INSERT_VARIABLE(XcodeTestApplicationName)
     INSERT_VARIABLE(Testonly)
     INSERT_VARIABLE(Visibility)
     INSERT_VARIABLE(WalkKeys)
+    INSERT_VARIABLE(WeakFrameworks)
     INSERT_VARIABLE(WriteOutputConversion)
     INSERT_VARIABLE(WriteValueContents)
     INSERT_VARIABLE(WriteRuntimeDeps)
     INSERT_VARIABLE(XcodeExtraAttributes)
     InsertRustVariables(&info_map);
+    InsertSwiftVariables(&info_map);
   }
   return info_map;
 }

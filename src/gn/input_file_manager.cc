@@ -14,6 +14,7 @@
 #include "gn/scope_per_file_provider.h"
 #include "gn/tokenizer.h"
 #include "gn/trace.h"
+#include "gn/vector_utils.h"
 
 namespace {
 
@@ -36,6 +37,7 @@ void InvokeFileLoadCallback(const InputFileManager::FileLoadCallback& cb,
 bool DoLoadFile(const LocationRange& origin,
                 const BuildSettings* build_settings,
                 const SourceFile& name,
+                InputFileManager::SyncLoadFileCallback load_file_callback,
                 InputFile* file,
                 std::vector<Token>* tokens,
                 std::unique_ptr<ParseNode>* root,
@@ -52,7 +54,13 @@ bool DoLoadFile(const LocationRange& origin,
   // Read.
   base::FilePath primary_path = build_settings->GetFullPath(name);
   ScopedTrace load_trace(TraceItem::TRACE_FILE_LOAD, name.value());
-  if (!file->Load(primary_path)) {
+  if (load_file_callback) {
+    if (!load_file_callback(name, file)) {
+      *err = Err(origin, "Can't load input file.",
+                 "File not mocked by load_file_callback:\n  " + name.value());
+      return false;
+    }
+  } else if (!file->Load(primary_path)) {
     if (!build_settings->secondary_source_path().empty()) {
       // Fall back to secondary source tree.
       base::FilePath secondary_path =
@@ -256,13 +264,13 @@ int InputFileManager::GetInputFileCount() const {
   return static_cast<int>(input_files_.size());
 }
 
-void InputFileManager::GetAllPhysicalInputFileNames(
-    std::vector<base::FilePath>* result) const {
+void InputFileManager::AddAllPhysicalInputFileNamesToVectorSetSorter(
+    VectorSetSorter<base::FilePath>* sorter) const {
   std::lock_guard<std::mutex> lock(lock_);
-  result->reserve(input_files_.size());
+
   for (const auto& file : input_files_) {
     if (!file.second->file.physical_name().empty())
-      result->push_back(file.second->file.physical_name());
+      sorter->Add(file.second->file.physical_name());
   }
 }
 
@@ -283,9 +291,9 @@ bool InputFileManager::LoadFile(const LocationRange& origin,
   std::vector<Token> tokens;
   std::unique_ptr<ParseNode> root;
   bool success =
-      DoLoadFile(origin, build_settings, name, file, &tokens, &root, err);
+      DoLoadFile(origin, build_settings, name, load_file_callback_, file, &tokens, &root, err);
   // Can't return early. We have to ensure that the completion event is
-  // signaled in all cases bacause another thread could be blocked on this one.
+  // signaled in all cases because another thread could be blocked on this one.
 
   // Save this pointer for running the callbacks below, which happens after the
   // scoped ptr ownership is taken away inside the lock.

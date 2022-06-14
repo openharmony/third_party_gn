@@ -29,8 +29,8 @@ std::string DirWithNoTrailingSlash(const SourceDir& dir) {
 // used. The value is used only for generating error messages.
 bool ComputeBuildLocationFromDep(const Value& input_value,
                                  const SourceDir& current_dir,
-                                 const std::string_view& source_root,
-                                 const std::string_view& input,
+                                 std::string_view source_root,
+                                 std::string_view input,
                                  SourceDir* result,
                                  Err* err) {
   // No rule, use the current location.
@@ -50,12 +50,12 @@ bool ComputeBuildLocationFromDep(const Value& input_value,
 // error messages.
 bool ComputeTargetNameFromDep(const Value& input_value,
                               const SourceDir& computed_location,
-                              const std::string_view& input,
-                              std::string* result,
+                              std::string_view input,
+                              StringAtom* result,
                               Err* err) {
   if (!input.empty()) {
     // Easy case: input is specified, just use it.
-    result->assign(input.data(), input.size());
+    *result = StringAtom(input);
     return true;
   }
 
@@ -69,8 +69,8 @@ bool ComputeTargetNameFromDep(const Value& input_value,
 
   size_t next_to_last_slash = loc.rfind('/', loc.size() - 2);
   DCHECK(next_to_last_slash != std::string::npos);
-  result->assign(&loc[next_to_last_slash + 1],
-                 loc.size() - next_to_last_slash - 2);
+  *result = StringAtom(std::string_view{&loc[next_to_last_slash + 1],
+                                        loc.size() - next_to_last_slash - 2});
   return true;
 }
 
@@ -88,14 +88,14 @@ bool ComputeTargetNameFromDep(const Value& input_value,
 // Returns true on success. On failure, the out* variables might be written to
 // but shouldn't be used.
 bool Resolve(const SourceDir& current_dir,
-             const std::string_view& source_root,
+             std::string_view source_root,
              const Label& current_toolchain,
              const Value& original_value,
-             const std::string_view& input,
+             std::string_view input,
              SourceDir* out_dir,
-             std::string* out_name,
+             StringAtom* out_name,
              SourceDir* out_toolchain_dir,
-             std::string* out_toolchain_name,
+             StringAtom* out_toolchain_name,
              Err* err) {
   // To workaround the problem that std::string_view operator[] doesn't return a
   // ref.
@@ -185,7 +185,7 @@ bool Resolve(const SourceDir& current_dir,
     // check.
     if (toolchain_piece.empty()) {
       *out_toolchain_dir = current_toolchain.dir();
-      *out_toolchain_name = current_toolchain.name();
+      *out_toolchain_name = current_toolchain.name_atom();
       return true;
     } else {
       return Resolve(current_dir, source_root, current_toolchain,
@@ -253,22 +253,24 @@ Implicit names
     //tools/gn  ->  //tools/gn:gn
 )*";
 
-Label::Label(const SourceDir& dir,
-             const std::string_view& name,
-             const SourceDir& toolchain_dir,
-             const std::string_view& toolchain_name)
-    : dir_(dir), toolchain_dir_(toolchain_dir) {
-  name_.assign(name.data(), name.size());
-  toolchain_name_.assign(toolchain_name.data(), toolchain_name.size());
-}
+Label::Label() : hash_(ComputeHash()) {}
 
-Label::Label(const SourceDir& dir, const std::string_view& name) : dir_(dir) {
-  name_.assign(name.data(), name.size());
-}
+Label::Label(const SourceDir& dir,
+             std::string_view name,
+             const SourceDir& toolchain_dir,
+             std::string_view toolchain_name)
+    : dir_(dir),
+      name_(StringAtom(name)),
+      toolchain_dir_(toolchain_dir),
+      toolchain_name_(StringAtom(toolchain_name)),
+      hash_(ComputeHash()) {}
+
+Label::Label(const SourceDir& dir, std::string_view name)
+    : dir_(dir), name_(StringAtom(name)), hash_(ComputeHash()) {}
 
 // static
 Label Label::Resolve(const SourceDir& current_dir,
-                     const std::string_view& source_root,
+                     std::string_view source_root,
                      const Label& current_toolchain,
                      const Value& input,
                      Err* err) {
@@ -287,6 +289,8 @@ Label Label::Resolve(const SourceDir& current_dir,
                  input_string, &ret.dir_, &ret.name_, &ret.toolchain_dir_,
                  &ret.toolchain_name_, err))
     return Label();
+
+  ret.hash_ = ret.ComputeHash();
   return ret;
 }
 
@@ -300,21 +304,21 @@ Label Label::GetWithNoToolchain() const {
 
 std::string Label::GetUserVisibleName(bool include_toolchain) const {
   std::string ret;
-  ret.reserve(dir_.value().size() + name_.size() + 1);
+  ret.reserve(dir_.value().size() + name_.str().size() + 1);
 
   if (dir_.is_null())
     return ret;
 
   ret = DirWithNoTrailingSlash(dir_);
   ret.push_back(':');
-  ret.append(name_);
+  ret.append(name_.str());
 
   if (include_toolchain) {
     ret.push_back('(');
     if (!toolchain_dir_.is_null() && !toolchain_name_.empty()) {
       ret.append(DirWithNoTrailingSlash(toolchain_dir_));
       ret.push_back(':');
-      ret.append(toolchain_name_);
+      ret.append(toolchain_name_.str());
     }
     ret.push_back(')');
   }
@@ -323,6 +327,6 @@ std::string Label::GetUserVisibleName(bool include_toolchain) const {
 
 std::string Label::GetUserVisibleName(const Label& default_toolchain) const {
   bool include_toolchain = default_toolchain.dir() != toolchain_dir_ ||
-                           default_toolchain.name() != toolchain_name_;
+                           default_toolchain.name_atom() != toolchain_name_;
   return GetUserVisibleName(include_toolchain);
 }

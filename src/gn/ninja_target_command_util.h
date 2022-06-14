@@ -5,6 +5,8 @@
 #ifndef TOOLS_GN_NINJA_TARGET_COMMAND_WRITER_H_
 #define TOOLS_GN_NINJA_TARGET_COMMAND_WRITER_H_
 
+#include <string_view>
+
 #include "base/json/string_escape.h"
 #include "gn/config_values_extractors.h"
 #include "gn/escape.h"
@@ -17,24 +19,14 @@
 
 struct DefineWriter {
   DefineWriter() { options.mode = ESCAPE_NINJA_COMMAND; }
-  DefineWriter(EscapingMode mode, bool escape_strings)
-      : escape_strings(escape_strings) {
-    options.mode = mode;
-  }
+  DefineWriter(EscapingMode mode) { options.mode = mode; }
 
   void operator()(const std::string& s, std::ostream& out) const {
     out << " ";
-    if (escape_strings) {
-      std::string dest;
-      base::EscapeJSONString(s, false, &dest);
-      EscapeStringToStream(out, "-D" + dest, options);
-      return;
-    }
     EscapeStringToStream(out, "-D" + s, options);
   }
 
   EscapeOptions options;
-  bool escape_strings = false;
 };
 
 struct FrameworkDirsWriter {
@@ -59,29 +51,19 @@ struct FrameworkDirsWriter {
 
 struct FrameworksWriter {
   explicit FrameworksWriter(const std::string& tool_switch)
-      : FrameworksWriter(ESCAPE_NINJA_COMMAND, false, tool_switch) {}
-  FrameworksWriter(EscapingMode mode,
-                   bool escape_strings,
-                   const std::string& tool_switch)
-      : escape_strings_(escape_strings), tool_switch_(tool_switch) {
+      : FrameworksWriter(ESCAPE_NINJA_COMMAND, tool_switch) {}
+  FrameworksWriter(EscapingMode mode, const std::string& tool_switch)
+      : tool_switch_(tool_switch) {
     options_.mode = mode;
   }
 
   void operator()(const std::string& s, std::ostream& out) const {
     out << " " << tool_switch_;
     std::string_view framework_name = GetFrameworkName(s);
-
-    if (escape_strings_) {
-      std::string dest;
-      base::EscapeJSONString(framework_name, false, &dest);
-      EscapeStringToStream(out, dest, options_);
-      return;
-    }
     EscapeStringToStream(out, framework_name, options_);
   }
 
   EscapeOptions options_;
-  bool escape_strings_;
   std::string tool_switch_;
 };
 
@@ -110,7 +92,8 @@ struct IncludeWriter {
 // The tool_type indicates the corresponding tool for flags that are
 // tool-specific (e.g. "cflags_c"). For non-tool-specific flags (e.g.
 // "defines") tool_type should be TYPE_NONE.
-void WriteOneFlag(const Target* target,
+void WriteOneFlag(RecursiveWriterConfig config,
+                  const Target* target,
                   const Substitution* subst_enum,
                   bool has_precompiled_headers,
                   const char* tool_name,
@@ -119,7 +102,8 @@ void WriteOneFlag(const Target* target,
                   EscapeOptions flag_escape_options,
                   PathOutput& path_output,
                   std::ostream& out,
-                  bool write_substitution = true);
+                  bool write_substitution = true,
+                  bool indent = false);
 
 // Fills |outputs| with the object or gch file for the precompiled header of the
 // given type (flag type and tool type must match).

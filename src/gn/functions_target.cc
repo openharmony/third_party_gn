@@ -138,6 +138,12 @@ Inputs
   It is recommended you put inputs to your script in the "sources" variable,
   and stuff like other Python files required to run your script in the "inputs"
   variable.
+
+  Actions can take the configs and public_configs lists, as well as any of the
+  configs variables (defines, include_dirs, etc.) set directly on the target.
+  These behave exactly as they would on a binary target and can be accessed
+  using substitution patterns in the script args (see "gn help args") to
+  implement custom compiler-like tools.
 )"
 
     ACTION_DEPS
@@ -160,8 +166,11 @@ File name handling
     R"(
 Variables
 
-  args, data, data_deps, depfile, deps, inputs, metadata, outputs*, pool,
-  response_file_contents, script*, sources
+  args, asmflags, bridge_header, cflags, cflags_c, cflags_cc, cflags_objc,
+  cflags_objcc, configs, data, data_deps, defines, depfile, deps,
+  framework_dirs, include_dirs, inputs, metadata, module_deps, module_name,
+  outputs*, pool, response_file_contents, rustenv, rustflags, script*, sources,
+  swiftflags
   * = required
 
 Example
@@ -230,9 +239,11 @@ File name handling
     R"(
 Variables
 
-  args, data, data_deps, depfile, deps, inputs, metadata, outputs*, pool,
-  response_file_contents, script*, sources*
-  * = required
+  args, asmflags, bridge_header, cflags, cflags_c, cflags_cc, cflags_objc,
+  cflags_objcc, configs, data, data_deps, defines, depfile, deps,
+  framework_dirs, include_dirs, inputs, metadata, module_deps, module_name,
+  outputs*, pool, response_file_contents, rustenv, rustflags, script*, sources,
+  swiftflags
 
 Example
 
@@ -256,7 +267,7 @@ Example
     args = [
       "{{source}}",
       "-o",
-      rebase_path(relative_target_gen_dir, root_build_dir) +
+      rebase_path(target_gen_dir, root_build_dir) +
         "/{{source_name_part}}.h" ]
   }
 )";
@@ -278,7 +289,7 @@ const char kBundleData_HelpShort[] =
 const char kBundleData_Help[] =
     R"(bundle_data: [iOS/macOS] Declare a target without output.
 
-  This target type allows to declare data that is required at runtime. It is
+  This target type allows one to declare data that is required at runtime. It is
   used to inform "create_bundle" targets of the files to copy into generated
   bundle, see "gn help create_bundle" for help.
 
@@ -443,7 +454,7 @@ Example
           bundle_resources_dir = bundle_contents_dir
           bundle_executable_dir = bundle_contents_dir
 
-          extra_attributes = {
+          xcode_extra_attributes = {
             ONLY_ACTIVE_ARCH = "YES"
             DEBUG_INFORMATION_FORMAT = "dwarf"
           }
@@ -740,8 +751,7 @@ const char kSourceSet_HelpShort[] = "source_set: Declare a source set target.";
 const char kSourceSet_Help[] =
     R"(source_set: Declare a source set target.
 
-  The language of a source_set target is determined by the extensions present
-  in its sources.
+  Only C-language source sets are supported at the moment.
 
 C-language source_sets
 
@@ -765,13 +775,6 @@ C-language source_sets
   "exported symbol" notation indicate "export from the final shared library and
   not from the intermediate targets." There is no way to express this concept
   when linking multiple static libraries into a shared library.
-
-Rust-language source_sets
-
-  A Rust source set is a collection of sources that get passed along to the
-  final target that depends on it. No compilation is performed, and the source
-  files are simply added as dependencies on the eventual rustc invocation that
-  would produce a binary.
 
 Variables
 
@@ -894,12 +897,12 @@ const char kGeneratedFile_Help[] =
   specifying the intended location of the output file.
 
   The `output_conversion` variable specified the format to write the
-  value. See `gn help output_conversion`.
+  value. See `gn help io_conversion`.
 
-  One of `contents` or `data_keys` must be specified; use of `data` will write
-  the contents of that value to file, while use of `data_keys` will trigger a
-  metadata collection walk based on the dependencies of the target and the
-  optional values of the `rebase` and `walk_keys` variables. See
+  One of `contents` or `data_keys` must be specified; use of `contents` will
+  write the contents of that value to file, while use of `data_keys` will
+  trigger a metadata collection walk based on the dependencies of the target and
+  the optional values of the `rebase` and `walk_keys` variables. See
   `gn help metadata`.
 
   Collected metadata, if specified, will be returned in postorder of

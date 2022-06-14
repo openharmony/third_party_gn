@@ -8,8 +8,8 @@
 
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
-#include <unordered_set>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
@@ -25,6 +25,7 @@
 #include "gn/ninja_utils.h"
 #include "gn/pool.h"
 #include "gn/scheduler.h"
+#include "gn/string_atom.h"
 #include "gn/switches.h"
 #include "gn/target.h"
 #include "gn/trace.h"
@@ -113,6 +114,15 @@ base::CommandLine GetSelfInvocationCommandLine(
     }
   }
 
+  // Add the regeneration switch if not already present. This is so that when
+  // the regeneration is invoked by ninja, the gen command is aware that it is a
+  // regeneration invocation and not an user invocation. This allows the gen
+  // command to elide ninja post processing steps that ninja will perform
+  // itself.
+  if (!cmdline.HasSwitch(switches::kRegeneration)) {
+    cmdline.AppendSwitch(switches::kRegeneration);
+  }
+
   return cmdline;
 }
 
@@ -146,7 +156,7 @@ Err GetDuplicateOutputError(const std::vector<const Target*>& all_targets,
   DCHECK(matches.size() >= 2);
   std::string matches_string;
   for (const Target* target : matches)
-    matches_string += "  " + target->label().GetUserVisibleName(false) + "\n";
+    matches_string += "  " + target->label().GetUserVisibleName(true) + "\n";
 
   Err result(matches[0]->defined_from(), "Duplicate output file.",
              "Two or more targets generate the same output:\n  " +
@@ -277,9 +287,12 @@ bool NinjaBuildWriter::RunAndWriteFile(const BuildSettings* build_settings,
 }
 
 void NinjaBuildWriter::WriteNinjaRules() {
-  out_ << "ninja_required_version = 1.7.2\n\n";
+  out_ << "ninja_required_version = "
+       << build_settings_->ninja_required_version().Describe() << "\n\n";
   out_ << "rule gn\n";
   out_ << "  command = " << GetSelfInvocationCommand(build_settings_) << "\n";
+  // Putting gn rule to console pool for colorful output on regeneration
+  out_ << "  pool = console\n";
   out_ << "  description = Regenerating ninja files\n\n";
 
   // This rule will regenerate the ninja files when any input file has changed.
@@ -292,37 +305,42 @@ void NinjaBuildWriter::WriteNinjaRules() {
   // exist and will error if they don't. When files are listed in a depfile,
   // missing files are ignored.
   dep_out_ << "build.ninja:";
-  std::vector<base::FilePath> input_files;
-  g_scheduler->input_file_manager()->GetAllPhysicalInputFileNames(&input_files);
 
   // Other files read by the build.
   std::vector<base::FilePath> other_files = g_scheduler->GetGenDependencies();
 
-  // Sort the input files to order them deterministically.
-  // Additionally, remove duplicate filepaths that seem to creep in.
-  std::set<base::FilePath> fileset(input_files.begin(), input_files.end());
-  fileset.insert(other_files.begin(), other_files.end());
+  const InputFileManager* input_file_manager =
+      g_scheduler->input_file_manager();
+
+  VectorSetSorter<base::FilePath> sorter(
+      input_file_manager->GetInputFileCount() + other_files.size());
+
+  input_file_manager->AddAllPhysicalInputFileNamesToVectorSetSorter(&sorter);
+  sorter.Add(other_files.begin(), other_files.end());
 
   const base::FilePath build_path =
       build_settings_->build_dir().Resolve(build_settings_->root_path());
 
   EscapeOptions depfile_escape;
   depfile_escape.mode = ESCAPE_DEPFILE;
-  for (const auto& other_file : fileset) {
+  auto item_callback = [this, &depfile_escape,
+                        &build_path](const base::FilePath& input_file) {
     const base::FilePath file =
-        MakeAbsoluteFilePathRelativeIfPossible(build_path, other_file);
+        MakeAbsoluteFilePathRelativeIfPossible(build_path, input_file);
     dep_out_ << " ";
     EscapeStringToStream(dep_out_,
                          FilePathToUTF8(file.NormalizePathSeparatorsTo('/')),
                          depfile_escape);
-  }
+  };
+
+  sorter.IterateOver(item_callback);
 
   out_ << std::endl;
 }
 
 void NinjaBuildWriter::WriteAllPools() {
   // Compute the pools referenced by all tools of all used toolchains.
-  std::unordered_set<const Pool*> used_pools;
+  std::set<const Pool*> used_pools;
   for (const auto& pair : used_toolchains_) {
     for (const auto& tool : pair.second->tools()) {
       if (tool.second->pool().ptr)
@@ -449,8 +467,8 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
   // Track rules as we generate them so we don't accidentally write a phony
   // rule that collides with something else.
   // GN internally generates an "all" target, so don't duplicate it.
-  std::unordered_set<std::string> written_rules;
-  written_rules.insert("all");
+  std::set<StringAtom, StringAtom::PtrCompare> written_rules;
+  written_rules.insert(StringAtom("all"));
 
   // Set if we encounter a target named "//:default".
   const Target* default_target = nullptr;
@@ -511,11 +529,13 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
     // If at this point there is a collision (no phony rules have been
     // generated yet), two targets make the same output so throw an error.
     for (const auto& output : target->computed_outputs()) {
-      // Need to normalize because many toolchain outputs will be preceeded
+      // Need to normalize because many toolchain outputs will be preceded
       // with "./".
       std::string output_string(output.value());
       NormalizePath(&output_string);
-      if (!written_rules.insert(output_string).second) {
+      const StringAtom output_string_atom(output_string);
+
+      if (!written_rules.insert(output_string_atom).second) {
         *err = GetDuplicateOutputError(default_toolchain_targets_, output);
         return false;
       }
@@ -524,14 +544,14 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
 
   // First prefer the short names of toplevel targets.
   for (const Target* target : toplevel_targets) {
-    if (written_rules.insert(target->label().name()).second)
-      WritePhonyRule(target, target->label().name());
+    if (written_rules.insert(target->label().name_atom()).second)
+      WritePhonyRule(target, target->label().name_atom());
   }
 
   // Next prefer short names of toplevel dir targets.
   for (const Target* target : toplevel_dir_targets) {
-    if (written_rules.insert(target->label().name()).second)
-      WritePhonyRule(target, target->label().name());
+    if (written_rules.insert(target->label().name_atom()).second)
+      WritePhonyRule(target, target->label().name_atom());
   }
 
   // Write out the names labels of executables. Many toolchains will produce
@@ -546,7 +566,7 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
   // toplevel build rule.
   for (const auto& pair : exes) {
     const Counts& counts = pair.second;
-    const std::string& short_name = counts.last_seen->label().name();
+    const StringAtom& short_name = counts.last_seen->label().name_atom();
     if (counts.count == 1 && written_rules.insert(short_name).second)
       WritePhonyRule(counts.last_seen, short_name);
   }
@@ -554,7 +574,7 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
   // Write short names when those names are unique and not already taken.
   for (const auto& pair : short_names) {
     const Counts& counts = pair.second;
-    const std::string& short_name = counts.last_seen->label().name();
+    const StringAtom& short_name = counts.last_seen->label().name_atom();
     if (counts.count == 1 && written_rules.insert(short_name).second)
       WritePhonyRule(counts.last_seen, short_name);
   }
@@ -566,19 +586,22 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
     // Write the long name "foo/bar:baz" for the target "//foo/bar:baz".
     std::string long_name = label.GetUserVisibleName(false);
     base::TrimString(long_name, "/", &long_name);
-    if (written_rules.insert(long_name).second)
-      WritePhonyRule(target, long_name);
+    const StringAtom long_name_atom(long_name);
+    if (written_rules.insert(long_name_atom).second)
+      WritePhonyRule(target, long_name_atom);
 
     // Write the directory name with no target name if they match
     // (e.g. "//foo/bar:bar" -> "foo/bar").
     if (FindLastDirComponent(label.dir()) == label.name()) {
       std::string medium_name = DirectoryWithNoLastSlash(label.dir());
       base::TrimString(medium_name, "/", &medium_name);
+      const StringAtom medium_name_atom(medium_name);
+
       // That may have generated a name the same as the short name of the
       // target which we already wrote.
       if (medium_name != label.name() &&
-          written_rules.insert(medium_name).second)
-        WritePhonyRule(target, medium_name);
+          written_rules.insert(medium_name_atom).second)
+        WritePhonyRule(target, medium_name_atom);
     }
   }
 
@@ -597,7 +620,7 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
 
   if (default_target) {
     // Use the short name when available
-    if (written_rules.find("default") != written_rules.end()) {
+    if (written_rules.find(StringAtom("default")) != written_rules.end()) {
       out_ << "\ndefault default" << std::endl;
     } else {
       out_ << "\ndefault ";
@@ -612,7 +635,7 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
 }
 
 void NinjaBuildWriter::WritePhonyRule(const Target* target,
-                                      const std::string& phony_name) {
+                                      std::string_view phony_name) {
   EscapeOptions ninja_escape;
   ninja_escape.mode = ESCAPE_NINJA;
 

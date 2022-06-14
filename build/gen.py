@@ -1,23 +1,28 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Generates build.ninja that will build GN."""
 
-import contextlib
-import errno
-import optparse
+import argparse
 import os
 import platform
 import re
+import shlex
 import subprocess
 import sys
-import tempfile
+
+# IMPORTANT: This script is also executed as python2 on
+# GN's CI builders.
+
+try:  # py3
+    from shlex import quote as shell_quote
+except ImportError:  # py2
+    from pipes import quote as shell_quote
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-
 
 class Platform(object):
   """Represents a host/target platform."""
@@ -32,6 +37,8 @@ class Platform(object):
       self._platform = 'darwin'
     elif self._platform.startswith('mingw'):
       self._platform = 'mingw'
+    elif self._platform.startswith('msys'):
+      self._platform = 'msys'
     elif self._platform.startswith('win'):
       self._platform = 'msvc'
     elif self._platform.startswith('aix'):
@@ -40,14 +47,20 @@ class Platform(object):
       self._platform = 'fuchsia'
     elif self._platform.startswith('freebsd'):
       self._platform = 'freebsd'
+    elif self._platform.startswith('netbsd'):
+      self._platform = 'netbsd'
     elif self._platform.startswith('openbsd'):
       self._platform = 'openbsd'
     elif self._platform.startswith('haiku'):
       self._platform = 'haiku'
+    elif self._platform.startswith('sunos'):
+      self._platform = 'solaris'
+    elif self._platform.startswith('zos'):
+      self._platform = 'zos'
 
   @staticmethod
   def known_platforms():
-    return ['linux', 'darwin', 'mingw', 'msvc', 'aix', 'fuchsia', 'freebsd', 'openbsd', 'haiku']
+    return ['linux', 'darwin', 'mingw', 'msys', 'msvc', 'aix', 'fuchsia', 'freebsd', 'netbsd', 'openbsd', 'haiku', 'solaris', 'zos']
 
   def platform(self):
     return self._platform
@@ -57,6 +70,9 @@ class Platform(object):
 
   def is_mingw(self):
     return self._platform == 'mingw'
+
+  def is_msys(self):
+    return self._platform == 'msys'
 
   def is_msvc(self):
     return self._platform == 'msvc'
@@ -73,39 +89,112 @@ class Platform(object):
   def is_haiku(self):
     return self._platform == 'haiku'
 
+  def is_solaris(self):
+    return self._platform == 'solaris'
+
   def is_posix(self):
-    return self._platform in ['linux', 'freebsd', 'darwin', 'aix', 'openbsd', 'haiku']
+    return self._platform in ['linux', 'freebsd', 'darwin', 'aix', 'openbsd', 'haiku', 'solaris', 'msys', 'netbsd']
+
+  def is_zos(self):
+    return self._platform == 'zos'
+
+class ArgumentsList:
+  """Helper class to accumulate ArgumentParser argument definitions
+  and be able to regenerate a corresponding command-line to be
+  written in the generated Ninja file for the 'regen' rule.
+  """
+  def __init__(self):
+    self._arguments = []
+
+  def add(self, *args, **kwargs):
+    """Add an argument definition, use as argparse.ArgumentParser.add_argument()."""
+    self._arguments.append((args, kwargs))
+
+  def add_to_parser(self, parser):
+    """Add all known arguments to parser."""
+    for args, kwargs in self._arguments:
+      parser.add_argument(*args, **kwargs)
+
+  def gen_command_line_args(self, parser_arguments):
+    """Generate a gen.py argument list to be embedded in a Ninja file."""
+    result = []
+    for args, kwargs in self._arguments:
+      if len(args) == 2:
+        long_option = args[1]
+      else:
+        long_option = args[0]
+      dest = kwargs.get('dest', None)
+      if dest is None:
+        assert long_option.startswith('--')
+        dest = long_option[2:].replace('-', '_')
+
+      if getattr(parser_arguments, dest, None) is None:
+        # This was not set on the command-line so skip it.
+        continue
+
+      action = kwargs.get('action', None)
+      if action == 'store_true':
+        if getattr(parser_arguments, dest):
+          result.append(long_option)
+      elif action == 'store' or action is None:
+        result.append('%s=%s' % (long_option, getattr(parser_arguments, dest)))
+      elif action == 'append':
+        for item in getattr(parser_arguments, dest):
+          result.append('%s=%s' % (long_option, item))
+      else:
+        assert action is None, "Unsupported action " + action
+    return ' '.join(shell_quote(item) for item in result)
 
 
 def main(argv):
-  parser = optparse.OptionParser(description=sys.modules[__name__].__doc__)
-  parser.add_option('-d', '--debug', action='store_true',
+  parser = argparse.ArgumentParser(description=sys.modules[__name__].__doc__)
+  args_list = ArgumentsList()
+
+  args_list.add('-d', '--debug', action='store_true',
                     help='Do a debug build. Defaults to release build.')
-  parser.add_option('--platform',
+  args_list.add('--platform',
                     help='target platform (' +
                          '/'.join(Platform.known_platforms()) + ')',
                     choices=Platform.known_platforms())
-  parser.add_option('--host',
+  args_list.add('--host',
                     help='host platform (' +
                          '/'.join(Platform.known_platforms()) + ')',
                     choices=Platform.known_platforms())
-  parser.add_option('--use-lto', action='store_true',
+  args_list.add('--use-lto', action='store_true',
                     help='Enable the use of LTO')
-  parser.add_option('--use-icf', action='store_true',
+  args_list.add('--use-icf', action='store_true',
                     help='Enable the use of Identical Code Folding')
-  parser.add_option('--no-last-commit-position', action='store_true',
+  args_list.add('--no-last-commit-position', action='store_true',
                     help='Do not generate last_commit_position.h.')
-  parser.add_option('--out-path',
+  args_list.add('--out-path',
                     help='The path to generate the build files in.')
-  parser.add_option('--no-strip', action='store_true',
+  args_list.add('--no-strip', action='store_true',
                     help='Don\'t strip release build. Useful for profiling.')
-  parser.add_option('--no-static-libstdc++', action='store_true',
+  args_list.add('--no-static-libstdc++', action='store_true',
                     default=False, dest='no_static_libstdcpp',
                     help='Don\'t link libstdc++ statically')
-  options, args = parser.parse_args(argv)
+  args_list.add('--link-lib',
+                    action='append',
+                    metavar='LINK_LIB',
+                    default=[],
+                    dest='link_libs',
+                    help=('Add a library to the final executable link. ' +
+                          'LINK_LIB must be the path to a static or shared ' +
+                          'library, or \'-l<name>\' on POSIX systems. Can be ' +
+                          'used multiple times. Useful to link custom malloc ' +
+                          'or cpu profiling libraries.'))
+  if sys.platform == 'zos':
+    args_list.add('--zoslib-dir',
+                      action='store',
+                      default='../third_party/zoslib',
+                      dest='zoslib_dir',
+                      help=('Specify the path of ZOSLIB directory, to link ' +
+                            'with <ZOSLIB_DIR>/install/lib/libzoslib.a, and ' +
+                            'add -I<ZOSLIB_DIR>/install/include to the compile ' +
+                            'commands. See README.md for details.'))
 
-  if args:
-    parser.error('Unrecognized command line arguments: %s.' % ', '.join(args))
+  args_list.add_to_parser(parser)
+  options = parser.parse_args(argv)
 
   platform = Platform(options.platform)
   if options.host:
@@ -119,7 +208,7 @@ def main(argv):
   if not options.no_last_commit_position:
     GenerateLastCommitPosition(host,
                                os.path.join(out_dir, 'last_commit_position.h'))
-  WriteGNNinja(os.path.join(out_dir, 'build.ninja'), platform, host, options)
+  WriteGNNinja(os.path.join(out_dir, 'build.ninja'), platform, host, options, args_list)
   return 0
 
 
@@ -157,16 +246,19 @@ def GenerateLastCommitPosition(host, header):
 
 def WriteGenericNinja(path, static_libraries, executables,
                       cxx, ar, ld, platform, host, options,
-                      cflags=[], ldflags=[], libflags=[],
-                      include_dirs=[], solibs=[]):
+                      args_list, cflags=[], ldflags=[],
+                      libflags=[], include_dirs=[], solibs=[]):
+  args = args_list.gen_command_line_args(options)
+  if args:
+    args = " " + args
+
   ninja_header_lines = [
     'cxx = ' + cxx,
     'ar = ' + ar,
     'ld = ' + ld,
     '',
     'rule regen',
-    '  command = %s ../build/gen.py%s' % (
-        sys.executable, ' -d' if options.debug else ''),
+    '  command = %s ../build/gen.py%s' % (sys.executable, args),
     '  description = Regenerating ninja files',
     '',
     'build build.ninja: regen',
@@ -179,12 +271,16 @@ def WriteGenericNinja(path, static_libraries, executables,
   template_filename = os.path.join(SCRIPT_DIR, {
       'msvc': 'build_win.ninja.template',
       'mingw': 'build_linux.ninja.template',
+      'msys': 'build_linux.ninja.template',
       'darwin': 'build_mac.ninja.template',
       'linux': 'build_linux.ninja.template',
       'freebsd': 'build_linux.ninja.template',
       'aix': 'build_aix.ninja.template',
       'openbsd': 'build_openbsd.ninja.template',
       'haiku': 'build_haiku.ninja.template',
+      'solaris': 'build_linux.ninja.template',
+      'netbsd': 'build_linux.ninja.template',
+      'zos': 'build_zos.ninja.template',
   }[platform.platform()])
 
   with open(template_filename) as f:
@@ -260,7 +356,7 @@ def WriteGenericNinja(path, static_libraries, executables,
             os.path.relpath(template_filename, os.path.dirname(path)) + '\n')
 
 
-def WriteGNNinja(path, platform, host, options):
+def WriteGNNinja(path, platform, host, options, args_list):
   if platform.is_msvc():
     cxx = os.environ.get('CXX', 'cl.exe')
     ld = os.environ.get('LD', 'link.exe')
@@ -269,6 +365,10 @@ def WriteGNNinja(path, platform, host, options):
     cxx = os.environ.get('CXX', 'g++')
     ld = os.environ.get('LD', 'g++')
     ar = os.environ.get('AR', 'ar -X64')
+  elif platform.is_msys() or platform.is_mingw():
+    cxx = os.environ.get('CXX', 'g++')
+    ld = os.environ.get('LD', 'g++')
+    ar = os.environ.get('AR', 'ar')
   else:
     cxx = os.environ.get('CXX', 'clang++')
     ld = cxx
@@ -282,6 +382,9 @@ def WriteGNNinja(path, platform, host, options):
       os.path.relpath(os.path.join(REPO_ROOT, 'src'), os.path.dirname(path)),
       '.',
   ]
+  if platform.is_zos():
+    include_dirs += [ options.zoslib_dir + '/install/include' ]
+
   libs = []
 
   if not platform.is_msvc():
@@ -300,8 +403,8 @@ def WriteGNNinja(path, platform, host, options):
       ldflags.extend(['-fdata-sections', '-ffunction-sections'])
       if platform.is_darwin():
         ldflags.append('-Wl,-dead_strip')
-      elif not platform.is_aix():
-        # Garbage collection is done by default on aix.
+      elif not platform.is_aix() and not platform.is_solaris() and not platform.is_zos():
+        # Garbage collection is done by default on aix, and option is unsupported on z/OS.
         ldflags.append('-Wl,--gc-sections')
 
       # Omit all symbol information from the output file.
@@ -310,7 +413,10 @@ def WriteGNNinja(path, platform, host, options):
           ldflags.append('-Wl,-S')
         elif platform.is_aix():
           ldflags.append('-Wl,-s')
-        else:
+        elif platform.is_solaris():
+          ldflags.append('-Wl,--strip-all')
+        elif not platform.is_zos():
+          # /bin/ld on z/OS doesn't have an equivalent option.
           ldflags.append('-Wl,-strip-all')
 
       # Enable identical code-folding.
@@ -335,14 +441,26 @@ def WriteGNNinja(path, platform, host, options):
         '-std=c++17'
     ])
 
-    if platform.is_linux() or platform.is_mingw():
+    if platform.is_linux() or platform.is_mingw() or platform.is_msys():
       ldflags.append('-Wl,--as-needed')
 
       if not options.no_static_libstdcpp:
         ldflags.append('-static-libstdc++')
 
-      # This is needed by libc++.
-      if not platform.is_mingw():
+      if platform.is_mingw() or platform.is_msys():
+        cflags.remove('-std=c++17')
+        cflags.extend([
+          '-Wno-deprecated-copy',
+          '-Wno-implicit-fallthrough',
+          '-Wno-redundant-move',
+          '-Wno-unused-variable',
+          '-Wno-format',             # Use of %llx, which is supported by _UCRT, false positive
+          '-Wno-strict-aliasing',    # Dereferencing punned pointer
+          '-Wno-cast-function-type', # Casting FARPROC to RegDeleteKeyExPtr
+          '-std=gnu++17',
+        ])
+      else:
+        # This is needed by libc++.
         libs.append('-ldl')
     elif platform.is_darwin():
       min_mac_version_flag = '-mmacosx-version-min=10.9'
@@ -354,11 +472,16 @@ def WriteGNNinja(path, platform, host, options):
     elif platform.is_haiku():
       cflags.append('-fPIC')
       cflags.extend(['-D_BSD_SOURCE'])
+    elif platform.is_zos():
+      cflags.append('-fzos-le-char-mode=ascii')
+      cflags.append('-Wno-unused-function')
+      cflags.append('-D_OPEN_SYS_FILE_EXT')
+      cflags.append('-DPATH_MAX=1024')
 
     if platform.is_posix() and not platform.is_haiku():
       ldflags.append('-pthread')
 
-    if platform.is_mingw():
+    if platform.is_mingw() or platform.is_msys():
       cflags.extend(['-DUNICODE',
                      '-DNOMINMAX',
                      '-DWIN32_LEAN_AND_MEAN',
@@ -453,6 +576,7 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/bundle_data.cc',
         'src/gn/bundle_data_target_generator.cc',
         'src/gn/bundle_file_rule.cc',
+        'src/gn/builtin_tool.cc',
         'src/gn/c_include_iterator.cc',
         'src/gn/c_substitution_type.cc',
         'src/gn/c_tool.cc',
@@ -460,16 +584,19 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/command_args.cc',
         'src/gn/command_check.cc',
         'src/gn/command_clean.cc',
+        'src/gn/command_clean_stale.cc',
         'src/gn/command_desc.cc',
         'src/gn/command_format.cc',
         'src/gn/command_gen.cc',
         'src/gn/command_help.cc',
         'src/gn/command_ls.cc',
         'src/gn/command_meta.cc',
+        'src/gn/command_outputs.cc',
         'src/gn/command_path.cc',
         'src/gn/command_refs.cc',
         'src/gn/commands.cc',
         'src/gn/compile_commands_writer.cc',
+        'src/gn/rust_project_writer.cc',
         'src/gn/config.cc',
         'src/gn/config_values.cc',
         'src/gn/config_values_extractors.cc',
@@ -483,8 +610,10 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/escape.cc',
         'src/gn/exec_process.cc',
         'src/gn/filesystem_utils.cc',
+        'src/gn/file_writer.cc',
         'src/gn/frameworks_utils.cc',
         'src/gn/function_exec_script.cc',
+        'src/gn/function_filter.cc',
         'src/gn/function_foreach.cc',
         'src/gn/function_forward_variables_from.cc',
         'src/gn/function_get_label_info.cc',
@@ -531,6 +660,7 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/ninja_target_command_util.cc',
         'src/gn/ninja_target_writer.cc',
         'src/gn/ninja_toolchain_writer.cc',
+        'src/gn/ninja_tools.cc',
         'src/gn/ninja_utils.cc',
         'src/gn/ninja_writer.cc',
         'src/gn/operators.cc',
@@ -543,6 +673,7 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/pattern.cc',
         'src/gn/pool.cc',
         'src/gn/qt_creator_writer.cc',
+        'src/gn/resolved_target_data.cc',
         'src/gn/runtime_deps.cc',
         'src/gn/rust_substitution_type.cc',
         'src/gn/rust_tool.cc',
@@ -558,11 +689,15 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/source_file.cc',
         'src/gn/standard_out.cc',
         'src/gn/string_atom.cc',
+        'src/gn/string_output_buffer.cc',
         'src/gn/string_utils.cc',
         'src/gn/substitution_list.cc',
         'src/gn/substitution_pattern.cc',
         'src/gn/substitution_type.cc',
         'src/gn/substitution_writer.cc',
+        'src/gn/swift_values.cc',
+        'src/gn/swift_values_generator.cc',
+        'src/gn/swift_variables.cc',
         'src/gn/switches.cc',
         'src/gn/target.cc',
         'src/gn/target_generator.cc',
@@ -575,6 +710,7 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/value.cc',
         'src/gn/value_extractors.cc',
         'src/gn/variables.cc',
+        'src/gn/version.cc',
         'src/gn/visibility.cc',
         'src/gn/visual_studio_utils.cc',
         'src/gn/visual_studio_writer.cc',
@@ -598,15 +734,19 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/analyzer_unittest.cc',
         'src/gn/args_unittest.cc',
         'src/gn/builder_unittest.cc',
+        'src/gn/builder_record_map_unittest.cc',
         'src/gn/c_include_iterator_unittest.cc',
         'src/gn/command_format_unittest.cc',
+        'src/gn/commands_unittest.cc',
         'src/gn/compile_commands_writer_unittest.cc',
         'src/gn/config_unittest.cc',
         'src/gn/config_values_extractors_unittest.cc',
         'src/gn/escape_unittest.cc',
         'src/gn/exec_process_unittest.cc',
         'src/gn/filesystem_utils_unittest.cc',
+        'src/gn/file_writer_unittest.cc',
         'src/gn/frameworks_utils_unittest.cc',
+        'src/gn/function_filter_unittest.cc',
         'src/gn/function_foreach_unittest.cc',
         'src/gn/function_forward_variables_from_unittest.cc',
         'src/gn/function_get_label_info_unittest.cc',
@@ -620,10 +760,14 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/functions_target_rust_unittest.cc',
         'src/gn/functions_target_unittest.cc',
         'src/gn/functions_unittest.cc',
+        'src/gn/hash_table_base_unittest.cc',
         'src/gn/header_checker_unittest.cc',
+        'src/gn/immutable_vector_unittest.cc',
         'src/gn/inherited_libraries_unittest.cc',
         'src/gn/input_conversion_unittest.cc',
         'src/gn/json_project_writer_unittest.cc',
+        'src/gn/rust_project_writer_unittest.cc',
+        'src/gn/rust_project_writer_helpers_unittest.cc',
         'src/gn/label_pattern_unittest.cc',
         'src/gn/label_unittest.cc',
         'src/gn/loader_unittest.cc',
@@ -648,6 +792,9 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/parser_unittest.cc',
         'src/gn/path_output_unittest.cc',
         'src/gn/pattern_unittest.cc',
+        'src/gn/pointer_set_unittest.cc',
+        'src/gn/resolved_target_data_unittest.cc',
+        'src/gn/resolved_target_deps_unittest.cc',
         'src/gn/runtime_deps_unittest.cc',
         'src/gn/scope_per_file_provider_unittest.cc',
         'src/gn/scope_unittest.cc',
@@ -655,26 +802,32 @@ def WriteGNNinja(path, platform, host, options):
         'src/gn/source_dir_unittest.cc',
         'src/gn/source_file_unittest.cc',
         'src/gn/string_atom_unittest.cc',
+        'src/gn/string_output_buffer_unittest.cc',
         'src/gn/string_utils_unittest.cc',
         'src/gn/substitution_pattern_unittest.cc',
         'src/gn/substitution_writer_unittest.cc',
+        'src/gn/tagged_pointer_unittest.cc',
         'src/gn/target_unittest.cc',
+        'src/gn/target_public_pair_unittest.cc',
         'src/gn/template_unittest.cc',
         'src/gn/test_with_scheduler.cc',
         'src/gn/test_with_scope.cc',
         'src/gn/tokenizer_unittest.cc',
         'src/gn/unique_vector_unittest.cc',
         'src/gn/value_unittest.cc',
+        'src/gn/vector_utils_unittest.cc',
+        'src/gn/version_unittest.cc',
         'src/gn/visibility_unittest.cc',
         'src/gn/visual_studio_utils_unittest.cc',
         'src/gn/visual_studio_writer_unittest.cc',
         'src/gn/xcode_object_unittest.cc',
         'src/gn/xml_element_writer_unittest.cc',
+        'src/util/aligned_alloc_unittest.cc',
         'src/util/test/gn_test.cc',
       ], 'libs': []},
   }
 
-  if platform.is_posix():
+  if platform.is_posix() or platform.is_zos():
     static_libraries['base']['sources'].extend([
         'src/base/files/file_enumerator_posix.cc',
         'src/base/files/file_posix.cc',
@@ -682,6 +835,9 @@ def WriteGNNinja(path, platform, host, options):
         'src/base/posix/file_descriptor_shuffle.cc',
         'src/base/posix/safe_strerror.cc',
     ])
+
+  if platform.is_zos():
+    libs.extend([ options.zoslib_dir + '/install/lib/libzoslib.a' ])
 
   if platform.is_windows():
     static_libraries['base']['sources'].extend([
@@ -723,14 +879,15 @@ def WriteGNNinja(path, platform, host, options):
       ])
 
 
+  libs.extend(options.link_libs)
+
   # we just build static libraries that GN needs
   executables['gn']['libs'].extend(static_libraries.keys())
   executables['gn_unittests']['libs'].extend(static_libraries.keys())
 
   WriteGenericNinja(path, static_libraries, executables, cxx, ar, ld,
-                    platform, host, options, cflags, ldflags,
-                    libflags, include_dirs, libs)
-
+                    platform, host, options, args_list,
+                    cflags, ldflags, libflags, include_dirs, libs)
 
 if __name__ == '__main__':
   sys.exit(main(sys.argv[1:]))

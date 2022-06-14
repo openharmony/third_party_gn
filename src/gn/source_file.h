@@ -33,6 +33,7 @@ class SourceFile {
     SOURCE_H,
     SOURCE_M,
     SOURCE_MM,
+    SOURCE_MODULEMAP,
     SOURCE_S,
     SOURCE_RC,
     SOURCE_O,  // Object files can be inputs, too. Also counts .obj.
@@ -40,6 +41,8 @@ class SourceFile {
 
     SOURCE_RS,
     SOURCE_GO,
+    SOURCE_SWIFT,
+    SOURCE_SWIFTMODULE,
 
     // Must be last.
     SOURCE_NUMTYPES,
@@ -56,7 +59,14 @@ class SourceFile {
 
   bool is_null() const { return value_.empty(); }
   const std::string& value() const { return value_.str(); }
-  Type type() const { return type_; }
+  Type GetType() const;
+
+  // Optimized implementation of GetType() == SOURCE_XXX
+  bool IsDefType() const;          // SOURCE_DEF
+  bool IsModuleMapType() const;    // SOURCE_MODULEMAP
+  bool IsObjectType() const;       // SOURCE_O
+  bool IsSwiftType() const;        // SOURCE_SWIFT
+  bool IsSwiftModuleType() const;  // SOURCE_SWIFTMODULE
 
   // Returns everything after the last slash.
   std::string GetName() const;
@@ -88,7 +98,7 @@ class SourceFile {
   }
 
   bool operator==(const SourceFile& other) const {
-    return value_ == other.value_;
+    return value_.SameAs(other.value_);
   }
   bool operator!=(const SourceFile& other) const { return !operator==(other); }
   bool operator<(const SourceFile& other) const {
@@ -118,7 +128,6 @@ class SourceFile {
   void SetValue(const std::string& value);
 
   StringAtom value_;
-  Type type_ = SOURCE_UNKNOWN;
 };
 
 namespace std {
@@ -126,8 +135,7 @@ namespace std {
 template <>
 struct hash<SourceFile> {
   std::size_t operator()(const SourceFile& v) const {
-    hash<std::string> h;
-    return h(v.value());
+    return SourceFile::PtrHash()(v);
   }
 };
 
@@ -157,6 +165,7 @@ class SourceFileTypeSet {
   bool CSourceUsed() const;
   bool RustSourceUsed() const;
   bool GoSourceUsed() const;
+  bool SwiftSourceUsed() const;
 
   bool MixedSourceUsed() const;
 

@@ -142,16 +142,19 @@ TEST_F(TargetTest, DependentConfigs) {
 
   // Normal non-inherited config.
   Config config(setup.settings(), Label(SourceDir("//foo/"), "config"));
+  config.visibility().SetPublic();
   ASSERT_TRUE(config.OnResolved(&err));
   c.configs().push_back(LabelConfigPair(&config));
 
   // All dependent config.
   Config all(setup.settings(), Label(SourceDir("//foo/"), "all"));
+  all.visibility().SetPublic();
   ASSERT_TRUE(all.OnResolved(&err));
   c.all_dependent_configs().push_back(LabelConfigPair(&all));
 
   // Direct dependent config.
   Config direct(setup.settings(), Label(SourceDir("//foo/"), "direct"));
+  direct.visibility().SetPublic();
   ASSERT_TRUE(direct.OnResolved(&err));
   c.public_configs().push_back(LabelConfigPair(&direct));
 
@@ -211,17 +214,20 @@ TEST_F(TargetTest, NoDependentConfigsBetweenToolchains) {
 
   // All dependent config.
   Config all_dependent(setup.settings(), Label(SourceDir("//foo/"), "all"));
+  all_dependent.visibility().SetPublic();
   ASSERT_TRUE(all_dependent.OnResolved(&err));
   c.all_dependent_configs().push_back(LabelConfigPair(&all_dependent));
 
   // Public config.
   Config public_config(setup.settings(), Label(SourceDir("//foo/"), "public"));
+  public_config.visibility().SetPublic();
   ASSERT_TRUE(public_config.OnResolved(&err));
   c.public_configs().push_back(LabelConfigPair(&public_config));
 
   // Another public config.
   Config public_config2(setup.settings(),
                         Label(SourceDir("//foo/"), "public2"));
+  public_config2.visibility().SetPublic();
   ASSERT_TRUE(public_config2.OnResolved(&err));
   b.public_configs().push_back(LabelConfigPair(&public_config2));
 
@@ -267,11 +273,13 @@ TEST_F(TargetTest, DependentConfigsBetweenToolchainsWhenSet) {
 
   // All dependent config.
   Config all_dependent(setup.settings(), Label(SourceDir("//foo/"), "all"));
+  all_dependent.visibility().SetPublic();
   ASSERT_TRUE(all_dependent.OnResolved(&err));
   b.all_dependent_configs().push_back(LabelConfigPair(&all_dependent));
 
   // Public config.
   Config public_config(setup.settings(), Label(SourceDir("//foo/"), "public"));
+  public_config.visibility().SetPublic();
   ASSERT_TRUE(public_config.OnResolved(&err));
   b.public_configs().push_back(LabelConfigPair(&public_config));
 
@@ -503,6 +511,54 @@ TEST_F(TargetTest, VisibilityFails) {
   ASSERT_FALSE(a.OnResolved(&err));
 }
 
+// Test config visibility failure cases.
+TEST_F(TargetTest, VisibilityConfigFails) {
+  TestWithScope setup;
+  Err err;
+
+  Label config_label(SourceDir("//a/"), "config");
+  Config config(setup.settings(), config_label);
+  config.visibility().SetPrivate(config.label().dir());
+  ASSERT_TRUE(config.OnResolved(&err));
+
+  // Make a target using configs. This should fail.
+  TestTarget a(setup, "//app:a", Target::EXECUTABLE);
+  a.configs().push_back(LabelConfigPair(&config));
+  ASSERT_FALSE(a.OnResolved(&err));
+
+  // A target using public_configs should also fail.
+  TestTarget b(setup, "//app:b", Target::EXECUTABLE);
+  b.public_configs().push_back(LabelConfigPair(&config));
+  ASSERT_FALSE(b.OnResolved(&err));
+
+  // A target using all_dependent_configs should fail as well.
+  TestTarget c(setup, "//app:c", Target::EXECUTABLE);
+  c.all_dependent_configs().push_back(LabelConfigPair(&config));
+  ASSERT_FALSE(c.OnResolved(&err));
+}
+
+// Test Config -> Group -> A where the config is group is visible from A but
+// the config isn't, and the config is visible from the group.
+TEST_F(TargetTest, VisibilityConfigGroup) {
+  TestWithScope setup;
+  Err err;
+
+  Label config_label(SourceDir("//a/"), "config");
+  Config config(setup.settings(), config_label);
+  config.visibility().SetPrivate(config.label().dir());
+  ASSERT_TRUE(config.OnResolved(&err));
+
+  // Make a target using the config in the same directory.
+  TestTarget a(setup, "//a:a", Target::GROUP);
+  a.public_configs().push_back(LabelConfigPair(&config));
+  ASSERT_TRUE(a.OnResolved(&err));
+
+  // A target depending on a should be okay.
+  TestTarget b(setup, "//app:b", Target::EXECUTABLE);
+  b.private_deps().push_back(LabelTargetPair(&a));
+  ASSERT_TRUE(b.OnResolved(&err));
+}
+
 // Test visibility with a single data_dep.
 TEST_F(TargetTest, VisibilityDatadeps) {
   TestWithScope setup;
@@ -572,12 +628,38 @@ TEST_F(TargetTest, Testonly) {
   ASSERT_FALSE(product.OnResolved(&err));
 }
 
+// Configs can be testonly too.
+// Repeat the testonly test with a config.
+TEST_F(TargetTest, TestonlyConfig) {
+  TestWithScope setup;
+  Err err;
+
+  // "testconfig" is a test-only config.
+  Config testconfig(setup.settings(), Label(SourceDir("//test/"), "config"));
+  testconfig.set_testonly(true);
+  testconfig.visibility().SetPublic();
+  ASSERT_TRUE(testconfig.OnResolved(&err));
+
+  // "test" is a test-only executable that uses testconfig, this is OK.
+  TestTarget test(setup, "//test:test", Target::EXECUTABLE);
+  test.set_testonly(true);
+  test.configs().push_back(LabelConfigPair(&testconfig));
+  ASSERT_TRUE(test.OnResolved(&err));
+
+  // "product" is a non-test that uses testconfig. This should fail.
+  TestTarget product(setup, "//app:product", Target::EXECUTABLE);
+  product.set_testonly(false);
+  product.configs().push_back(LabelConfigPair(&testconfig));
+  ASSERT_FALSE(product.OnResolved(&err));
+}
+
 TEST_F(TargetTest, PublicConfigs) {
   TestWithScope setup;
   Err err;
 
   Label pub_config_label(SourceDir("//a/"), "pubconfig");
   Config pub_config(setup.settings(), pub_config_label);
+  pub_config.visibility().SetPublic();
   LibFile lib_name("testlib");
   pub_config.own_values().libs().push_back(lib_name);
   ASSERT_TRUE(pub_config.OnResolved(&err));
@@ -620,11 +702,13 @@ TEST_F(TargetTest, ConfigOrdering) {
   TestTarget dep1(setup, "//:dep1", Target::SOURCE_SET);
   Label dep1_all_config_label(SourceDir("//"), "dep1_all_config");
   Config dep1_all_config(setup.settings(), dep1_all_config_label);
+  dep1_all_config.visibility().SetPublic();
   ASSERT_TRUE(dep1_all_config.OnResolved(&err));
   dep1.all_dependent_configs().push_back(LabelConfigPair(&dep1_all_config));
 
   Label dep1_public_config_label(SourceDir("//"), "dep1_public_config");
   Config dep1_public_config(setup.settings(), dep1_public_config_label);
+  dep1_public_config.visibility().SetPublic();
   ASSERT_TRUE(dep1_public_config.OnResolved(&err));
   dep1.public_configs().push_back(LabelConfigPair(&dep1_public_config));
   ASSERT_TRUE(dep1.OnResolved(&err));
@@ -633,11 +717,13 @@ TEST_F(TargetTest, ConfigOrdering) {
   TestTarget dep2(setup, "//:dep2", Target::SOURCE_SET);
   Label dep2_all_config_label(SourceDir("//"), "dep2_all_config");
   Config dep2_all_config(setup.settings(), dep2_all_config_label);
+  dep2_all_config.visibility().SetPublic();
   ASSERT_TRUE(dep2_all_config.OnResolved(&err));
   dep2.all_dependent_configs().push_back(LabelConfigPair(&dep2_all_config));
 
   Label dep2_public_config_label(SourceDir("//"), "dep2_public_config");
   Config dep2_public_config(setup.settings(), dep2_public_config_label);
+  dep2_public_config.visibility().SetPublic();
   ASSERT_TRUE(dep2_public_config.OnResolved(&err));
   dep2.public_configs().push_back(LabelConfigPair(&dep2_public_config));
   ASSERT_TRUE(dep2.OnResolved(&err));
@@ -650,11 +736,13 @@ TEST_F(TargetTest, ConfigOrdering) {
   // It also has a private and public config.
   Label public_config_label(SourceDir("//"), "public");
   Config public_config(setup.settings(), public_config_label);
+  public_config.visibility().SetPublic();
   ASSERT_TRUE(public_config.OnResolved(&err));
   target.public_configs().push_back(LabelConfigPair(&public_config));
 
   Label private_config_label(SourceDir("//"), "private");
   Config private_config(setup.settings(), private_config_label);
+  private_config.visibility().SetPublic();
   ASSERT_TRUE(private_config.OnResolved(&err));
   target.configs().push_back(LabelConfigPair(&private_config));
 
@@ -719,6 +807,8 @@ TEST_F(TargetTest, LinkAndDepOutputs) {
 
 // Tests that runtime_outputs works without an explicit link_output for
 // solink tools.
+//
+// Also tests GetOutputsAsSourceFiles() for binaries (the setup is the same).
 TEST_F(TargetTest, RuntimeOuputs) {
   TestWithScope setup;
   Err err;
@@ -760,9 +850,176 @@ TEST_F(TargetTest, RuntimeOuputs) {
   ASSERT_EQ(2u, target.runtime_outputs().size());
   EXPECT_EQ("./a.dll", target.runtime_outputs()[0].value());
   EXPECT_EQ("./a.pdb", target.runtime_outputs()[1].value());
+
+  // Test GetOutputsAsSourceFiles().
+  std::vector<SourceFile> computed_outputs;
+  EXPECT_TRUE(target.GetOutputsAsSourceFiles(LocationRange(), true,
+                                             &computed_outputs, &err));
+  ASSERT_EQ(3u, computed_outputs.size());
+  EXPECT_EQ("//out/Debug/a.dll.lib", computed_outputs[0].value());
+  EXPECT_EQ("//out/Debug/a.dll", computed_outputs[1].value());
+  EXPECT_EQ("//out/Debug/a.pdb", computed_outputs[2].value());
 }
 
-// Shared libraries should be inherited across public shared liobrary
+// Tests Target::GetOutputFilesForSource for binary targets (these require a
+// tool definition). Also tests GetOutputsAsSourceFiles() for source sets.
+TEST_F(TargetTest, GetOutputFilesForSource_Binary) {
+  TestWithScope setup;
+
+  Toolchain toolchain(setup.settings(), Label(SourceDir("//tc/"), "tc"));
+
+  std::unique_ptr<Tool> tool = Tool::CreateTool(CTool::kCToolCxx);
+  CTool* cxx = tool->AsC();
+  cxx->set_outputs(SubstitutionList::MakeForTest("{{source_file_part}}.o"));
+  toolchain.SetTool(std::move(tool));
+
+  Target target(setup.settings(), Label(SourceDir("//a/"), "a"));
+  target.set_output_type(Target::SOURCE_SET);
+  target.SetToolchain(&toolchain);
+  Err err;
+  ASSERT_TRUE(target.OnResolved(&err));
+
+  const char* computed_tool_type = nullptr;
+  std::vector<OutputFile> output;
+  bool result = target.GetOutputFilesForSource(SourceFile("//source/input.cc"),
+                                               &computed_tool_type, &output);
+  ASSERT_TRUE(result);
+  EXPECT_EQ(std::string("cxx"), std::string(computed_tool_type));
+
+  // Outputs are relative to the build directory "//out/Debug/".
+  ASSERT_EQ(1u, output.size());
+  EXPECT_EQ("input.cc.o", output[0].value()) << output[0].value();
+
+  // Test GetOutputsAsSourceFiles(). Since this is a source set it should give a
+  // stamp file.
+  std::vector<SourceFile> computed_outputs;
+  EXPECT_TRUE(target.GetOutputsAsSourceFiles(LocationRange(), true,
+                                             &computed_outputs, &err));
+  ASSERT_EQ(1u, computed_outputs.size());
+  EXPECT_EQ("//out/Debug/obj/a/a.stamp", computed_outputs[0].value());
+}
+
+TEST_F(TargetTest, CheckStampFileName) {
+  TestWithScope setup;
+
+  Toolchain toolchain(setup.settings(), Label(SourceDir("//tc/"), "tc"));
+
+  std::unique_ptr<Tool> tool = Tool::CreateTool(CTool::kCToolCxx);
+  CTool* cxx = tool->AsC();
+  cxx->set_outputs(SubstitutionList::MakeForTest("{{source_file_part}}.o"));
+  toolchain.SetTool(std::move(tool));
+
+  Target target(setup.settings(), Label(SourceDir("//a/"), "a"));
+  target.set_output_type(Target::SOURCE_SET);
+  target.SetToolchain(&toolchain);
+
+  // Change the output artifact name on purpose.
+  target.set_output_name("b");
+
+  Err err;
+  ASSERT_TRUE(target.OnResolved(&err));
+
+  // Test GetOutputsAsSourceFiles(). Since this is a source set it should give a
+  // stamp file.
+  std::vector<SourceFile> computed_outputs;
+  EXPECT_TRUE(target.GetOutputsAsSourceFiles(LocationRange(), true,
+                                             &computed_outputs, &err));
+  ASSERT_EQ(1u, computed_outputs.size());
+  EXPECT_EQ("//out/Debug/obj/a/a.stamp", computed_outputs[0].value())
+    << "was instead: " << computed_outputs[0].value();
+}
+
+// Tests Target::GetOutputFilesForSource for action_foreach targets (these, like
+// copy targets, apply a pattern to the source file). Also tests
+// GetOutputsAsSourceFiles() for action_foreach().
+TEST_F(TargetTest, GetOutputFilesForSource_ActionForEach) {
+  TestWithScope setup;
+
+  TestTarget target(setup, "//a:a", Target::ACTION_FOREACH);
+  target.sources().push_back(SourceFile("//a/source_file1.txt"));
+  target.sources().push_back(SourceFile("//a/source_file2.txt"));
+  target.action_values().outputs() =
+      SubstitutionList::MakeForTest("//out/Debug/{{source_file_part}}.one",
+                                    "//out/Debug/{{source_file_part}}.two");
+  Err err;
+  ASSERT_TRUE(target.OnResolved(&err));
+
+  const char* computed_tool_type = nullptr;
+  std::vector<OutputFile> output;
+  bool result = target.GetOutputFilesForSource(SourceFile("//source/input.txt"),
+                                               &computed_tool_type, &output);
+  ASSERT_TRUE(result);
+
+  // Outputs are relative to the build directory "//out/Debug/".
+  ASSERT_EQ(2u, output.size());
+  EXPECT_EQ("input.txt.one", output[0].value());
+  EXPECT_EQ("input.txt.two", output[1].value());
+
+  // Test GetOutputsAsSourceFiles(). It should give both outputs for each of the
+  // two inputs.
+  std::vector<SourceFile> computed_outputs;
+  EXPECT_TRUE(target.GetOutputsAsSourceFiles(LocationRange(), true,
+                                             &computed_outputs, &err));
+  ASSERT_EQ(4u, computed_outputs.size());
+  EXPECT_EQ("//out/Debug/source_file1.txt.one", computed_outputs[0].value());
+  EXPECT_EQ("//out/Debug/source_file1.txt.two", computed_outputs[1].value());
+  EXPECT_EQ("//out/Debug/source_file2.txt.one", computed_outputs[2].value());
+  EXPECT_EQ("//out/Debug/source_file2.txt.two", computed_outputs[3].value());
+}
+
+// Tests Target::GetOutputFilesForSource for action targets (these just list the
+// output of the action as the result of all possible inputs). This should also
+// cover everything other than binary, action_foreach, and copy targets.
+TEST_F(TargetTest, GetOutputFilesForSource_Action) {
+  TestWithScope setup;
+
+  TestTarget target(setup, "//a:a", Target::ACTION);
+  target.sources().push_back(SourceFile("//a/source_file1.txt"));
+  target.action_values().outputs() =
+      SubstitutionList::MakeForTest("//out/Debug/one", "//out/Debug/two");
+  Err err;
+  ASSERT_TRUE(target.OnResolved(&err));
+
+  const char* computed_tool_type = nullptr;
+  std::vector<OutputFile> output;
+  bool result = target.GetOutputFilesForSource(SourceFile("//source/input.txt"),
+                                               &computed_tool_type, &output);
+  ASSERT_TRUE(result);
+
+  // Outputs are relative to the build directory "//out/Debug/".
+  ASSERT_EQ(2u, output.size());
+  EXPECT_EQ("one", output[0].value());
+  EXPECT_EQ("two", output[1].value());
+
+  // Test GetOutputsAsSourceFiles(). It should give the listed outputs.
+  std::vector<SourceFile> computed_outputs;
+  EXPECT_TRUE(target.GetOutputsAsSourceFiles(LocationRange(), true,
+                                             &computed_outputs, &err));
+  ASSERT_EQ(2u, computed_outputs.size());
+  EXPECT_EQ("//out/Debug/one", computed_outputs[0].value());
+  EXPECT_EQ("//out/Debug/two", computed_outputs[1].value());
+
+  // Test that the copy target type behaves the same. This target requires only
+  // one output.
+  target.action_values().outputs() =
+      SubstitutionList::MakeForTest("//out/Debug/one");
+  target.set_output_type(Target::COPY_FILES);
+
+  // Outputs are relative to the build directory "//out/Debug/".
+  result = target.GetOutputFilesForSource(SourceFile("//source/input.txt"),
+                                          &computed_tool_type, &output);
+  ASSERT_TRUE(result);
+  ASSERT_EQ(1u, output.size());
+  EXPECT_EQ("one", output[0].value());
+
+  // Test GetOutputsAsSourceFiles() for the copy case.
+  EXPECT_TRUE(target.GetOutputsAsSourceFiles(LocationRange(), true,
+                                             &computed_outputs, &err));
+  ASSERT_EQ(1u, computed_outputs.size()) << computed_outputs.size();
+  EXPECT_EQ("//out/Debug/one", computed_outputs[0].value());
+}
+
+// Shared libraries should be inherited across public shared library
 // boundaries.
 TEST_F(TargetTest, SharedInheritance) {
   TestWithScope setup;
@@ -1171,7 +1428,7 @@ TEST(TargetTest, CollectMetadataNoRecurse) {
 
   Err err;
   std::vector<Value> result;
-  std::set<const Target*> targets;
+  TargetSet targets;
   one.GetMetadata(data_keys, walk_keys, SourceDir(), false, &result, &targets,
                   &err);
   EXPECT_FALSE(err.has_error());
@@ -1212,7 +1469,54 @@ TEST(TargetTest, CollectMetadataWithRecurse) {
 
   Err err;
   std::vector<Value> result;
-  std::set<const Target*> targets;
+  TargetSet targets;
+  one.GetMetadata(data_keys, walk_keys, SourceDir(), false, &result, &targets,
+                  &err);
+  EXPECT_FALSE(err.has_error());
+
+  std::vector<Value> expected;
+  expected.push_back(Value(nullptr, "bar"));
+  expected.push_back(Value(nullptr, "foo"));
+  expected.push_back(Value(nullptr, true));
+  EXPECT_EQ(result, expected);
+}
+
+TEST(TargetTest, CollectMetadataWithRecurseHole) {
+  TestWithScope setup;
+
+  TestTarget one(setup, "//foo:one", Target::SOURCE_SET);
+  Value a_expected(nullptr, Value::LIST);
+  a_expected.list_value().push_back(Value(nullptr, "foo"));
+  one.metadata().contents().insert(
+      std::pair<std::string_view, Value>("a", a_expected));
+
+  Value b_expected(nullptr, Value::LIST);
+  b_expected.list_value().push_back(Value(nullptr, true));
+  one.metadata().contents().insert(
+      std::pair<std::string_view, Value>("b", b_expected));
+
+  // Target two does not have metadata but depends on three
+  // which does.
+  TestTarget two(setup, "//foo:two", Target::SOURCE_SET);
+
+  TestTarget three(setup, "//foo:three", Target::SOURCE_SET);
+  Value a_3_expected(nullptr, Value::LIST);
+  a_3_expected.list_value().push_back(Value(nullptr, "bar"));
+  three.metadata().contents().insert(
+      std::pair<std::string_view, Value>("a", a_3_expected));
+
+  one.public_deps().push_back(LabelTargetPair(&two));
+  two.public_deps().push_back(LabelTargetPair(&three));
+
+  std::vector<std::string> data_keys;
+  data_keys.push_back("a");
+  data_keys.push_back("b");
+
+  std::vector<std::string> walk_keys;
+
+  Err err;
+  std::vector<Value> result;
+  TargetSet targets;
   one.GetMetadata(data_keys, walk_keys, SourceDir(), false, &result, &targets,
                   &err);
   EXPECT_FALSE(err.has_error());
@@ -1234,8 +1538,7 @@ TEST(TargetTest, CollectMetadataWithBarrier) {
       std::pair<std::string_view, Value>("a", a_expected));
 
   Value walk_expected(nullptr, Value::LIST);
-  walk_expected.list_value().push_back(
-      Value(nullptr, "two"));
+  walk_expected.list_value().push_back(Value(nullptr, "two"));
   one.metadata().contents().insert(
       std::pair<std::string_view, Value>("walk", walk_expected));
 
@@ -1262,7 +1565,7 @@ TEST(TargetTest, CollectMetadataWithBarrier) {
 
   Err err;
   std::vector<Value> result;
-  std::set<const Target*> targets;
+  TargetSet targets;
   one.GetMetadata(data_keys, walk_keys, SourceDir(), false, &result, &targets,
                   &err);
   EXPECT_FALSE(err.has_error()) << err.message();
@@ -1295,7 +1598,7 @@ TEST(TargetTest, CollectMetadataWithError) {
 
   Err err;
   std::vector<Value> result;
-  std::set<const Target*> targets;
+  TargetSet targets;
   one.GetMetadata(data_keys, walk_keys, SourceDir(), false, &result, &targets,
                   &err);
   EXPECT_TRUE(err.has_error());
@@ -1353,4 +1656,34 @@ TEST_F(TargetTest, WriteMetadataCollection) {
   data_dep_present.data_deps().push_back(LabelTargetPair(&generator));
   EXPECT_TRUE(data_dep_present.OnResolved(&err));
   EXPECT_TRUE(scheduler().GetUnknownGeneratedInputs().empty());
+}
+
+// Tests that modulemap files use the cxx_module tool.
+TEST_F(TargetTest, ModuleMap) {
+  TestWithScope setup;
+
+  Toolchain toolchain(setup.settings(), Label(SourceDir("//tc/"), "tc"));
+
+  std::unique_ptr<Tool> tool = Tool::CreateTool(CTool::kCToolCxxModule);
+  CTool* cxx_module = tool->AsC();
+  cxx_module->set_outputs(
+      SubstitutionList::MakeForTest("{{source_file_part}}.pcm"));
+  toolchain.SetTool(std::move(tool));
+
+  Target target(setup.settings(), Label(SourceDir("//a/"), "a"));
+  target.set_output_type(Target::SOURCE_SET);
+  target.SetToolchain(&toolchain);
+  Err err;
+  ASSERT_TRUE(target.OnResolved(&err));
+
+  const char* computed_tool_type = nullptr;
+  std::vector<OutputFile> output;
+  bool result = target.GetOutputFilesForSource(
+      SourceFile("//source/input.modulemap"), &computed_tool_type, &output);
+  ASSERT_TRUE(result);
+  EXPECT_EQ(std::string("cxx_module"), std::string(computed_tool_type));
+
+  // Outputs are relative to the build directory "//out/Debug/".
+  ASSERT_EQ(1u, output.size());
+  EXPECT_EQ("input.modulemap.pcm", output[0].value()) << output[0].value();
 }

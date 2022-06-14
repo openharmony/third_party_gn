@@ -302,7 +302,7 @@ const char kConfig_Help[] =
   need to remove the corresponding config that sets it. The final set of flags,
   defines, etc. for a target is generated in this order:
 
-   1. The values specified directly on the target (rather than using a config.
+   1. The values specified directly on the target (rather than using a config).
    2. The configs specified in the target's "configs" list, in order.
    3. Public_configs from a breadth-first traversal of the dependency tree in
       the order that the targets appear in "deps".
@@ -332,6 +332,7 @@ Variables valid in a config definition
     CONFIG_VALUES_VARS_HELP
 
     R"(  Nested configs: configs
+  General: visibility
 
 Variables on a target used to apply configs
 
@@ -803,85 +804,6 @@ Value RunNotNeeded(Scope* scope,
   // Not the right type of argument.
   *err = Err(*value, "Not a valid list of variables.",
              "Expecting either the string \"*\" or a list of strings.");
-  return Value();
-}
-
-// set_sources_assignment_filter -----------------------------------------------
-
-const char kSetSourcesAssignmentFilter[] = "set_sources_assignment_filter";
-const char kSetSourcesAssignmentFilter_HelpShort[] =
-    "set_sources_assignment_filter: Set a pattern to filter source files.";
-const char kSetSourcesAssignmentFilter_Help[] =
-    R"(set_sources_assignment_filter: Set a pattern to filter source files.
-
-  The sources assignment filter is a list of patterns that remove files from
-  the list implicitly whenever the "sources" variable is assigned to. This will
-  do nothing for non-lists.
-
-  This is intended to be used to globally filter out files with
-  platform-specific naming schemes when they don't apply, for example you may
-  want to filter out all "*_win.cc" files on non-Windows platforms.
-
-  Typically this will be called once in the master build config script to set
-  up the filter for the current platform. Subsequent calls will overwrite the
-  previous values.
-
-  If you want to bypass the filter and add a file even if it might be filtered
-  out, call set_sources_assignment_filter([]) to clear the list of filters.
-  This will apply until the current scope exits
-
-How to use patterns
-
-  File patterns are VERY limited regular expressions. They must match the
-  entire input string to be counted as a match. In regular expression parlance,
-  there is an implicit "^...$" surrounding your input. If you want to match a
-  substring, you need to use wildcards at the beginning and end.
-
-  There are only two special tokens understood by the pattern matcher.
-  Everything else is a literal.
-
-   - "*" Matches zero or more of any character. It does not depend on the
-     preceding character (in regular expression parlance it is equivalent to
-     ".*").
-
-   - "\b" Matches a path boundary. This will match the beginning or end of a
-     string, or a slash.
-
-Pattern examples
-
-  "*asdf*"
-      Matches a string containing "asdf" anywhere.
-
-  "asdf"
-      Matches only the exact string "asdf".
-
-  "*.cc"
-      Matches strings ending in the literal ".cc".
-
-  "\bwin/*"
-      Matches "win/foo" and "foo/win/bar.cc" but not "iwin/foo".
-
-Sources assignment example
-
-  # Filter out all _win files.
-  set_sources_assignment_filter([ "*_win.cc", "*_win.h" ])
-  sources = [ "a.cc", "b_win.cc" ]
-  print(sources)
-  # Will print [ "a.cc" ]. b_win one was filtered out.
-)";
-
-Value RunSetSourcesAssignmentFilter(Scope* scope,
-                                    const FunctionCallNode* function,
-                                    const std::vector<Value>& args,
-                                    Err* err) {
-  if (args.size() != 1) {
-    *err = Err(function, "set_sources_assignment_filter takes one argument.");
-  } else {
-    std::unique_ptr<PatternList> f = std::make_unique<PatternList>();
-    f->SetFromValue(args[0], err);
-    if (!err->has_error())
-      scope->set_sources_assignment_filter(std::move(f));
-  }
   return Value();
 }
 
@@ -1459,6 +1381,8 @@ struct FunctionInfoInitializer {
     INSERT_FUNCTION(DeclareArgs, false)
     INSERT_FUNCTION(Defined, false)
     INSERT_FUNCTION(ExecScript, false)
+    INSERT_FUNCTION(FilterExclude, false)
+    INSERT_FUNCTION(FilterInclude, false)
     INSERT_FUNCTION(ForEach, false)
     INSERT_FUNCTION(ForwardVariablesFrom, false)
     INSERT_FUNCTION(GetEnv, false)
@@ -1474,7 +1398,6 @@ struct FunctionInfoInitializer {
     INSERT_FUNCTION(RebasePath, false)
     INSERT_FUNCTION(SetDefaults, false)
     INSERT_FUNCTION(SetDefaultToolchain, false)
-    INSERT_FUNCTION(SetSourcesAssignmentFilter, false)
     INSERT_FUNCTION(SplitList, false)
     INSERT_FUNCTION(StringJoin, false)
     INSERT_FUNCTION(StringReplace, false)

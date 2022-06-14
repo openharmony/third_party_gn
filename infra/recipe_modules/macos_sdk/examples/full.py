@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+PYTHON_VERSION_COMPATIBILITY = 'PY3'
+
 DEPS = [
     'macos_sdk',
     'recipe_engine/platform',
@@ -12,6 +14,7 @@ DEPS = [
 
 def RunSteps(api):
   with api.macos_sdk():
+    sdk_dir = api.macos_sdk.sdk_dir if api.platform.is_mac else None
     api.step('gn', ['gn', 'gen', 'out/Release'])
     api.step('ninja', ['ninja', '-C', 'out/Release'])
 

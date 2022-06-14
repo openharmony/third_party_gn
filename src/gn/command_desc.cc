@@ -16,8 +16,10 @@
 #include "gn/commands.h"
 #include "gn/config.h"
 #include "gn/desc_builder.h"
+#include "gn/rust_variables.h"
 #include "gn/setup.h"
 #include "gn/standard_out.h"
+#include "gn/swift_variables.h"
 #include "gn/switches.h"
 #include "gn/target.h"
 #include "gn/variables.h"
@@ -294,12 +296,18 @@ std::map<std::string, DescHandlerFunc> GetHandlers() {
           {variables::kPrecompiledHeader, DefaultHandler},
           {variables::kPrecompiledSource, DefaultHandler},
           {variables::kDeps, DepsHandler},
+          {variables::kGenDeps, DefaultHandler},
           {variables::kLibs, DefaultHandler},
           {variables::kLibDirs, DefaultHandler},
           {variables::kDataKeys, DefaultHandler},
           {variables::kRebase, DefaultHandler},
           {variables::kWalkKeys, DefaultHandler},
+          {variables::kWeakFrameworks, DefaultHandler},
           {variables::kWriteOutputConversion, DefaultHandler},
+          {variables::kRustCrateName, DefaultHandler},
+          {variables::kRustCrateRoot, DefaultHandler},
+          {variables::kSwiftModuleName, DefaultHandler},
+          {variables::kSwiftBridgeHeader, DefaultHandler},
           {"runtime_deps", DefaultHandler}};
 }
 
@@ -350,12 +358,16 @@ bool PrintTarget(const Target* target,
   // Entries with DefaultHandler are present to enforce order
   HandleProperty("type", handler_map, v, dict);
   HandleProperty("toolchain", handler_map, v, dict);
+  HandleProperty(variables::kSwiftModuleName, handler_map, v, dict);
+  HandleProperty(variables::kRustCrateName, handler_map, v, dict);
+  HandleProperty(variables::kRustCrateRoot, handler_map, v, dict);
   HandleProperty(variables::kVisibility, handler_map, v, dict);
   HandleProperty(variables::kMetadata, handler_map, v, dict);
   HandleProperty(variables::kTestonly, handler_map, v, dict);
   HandleProperty(variables::kCheckIncludes, handler_map, v, dict);
   HandleProperty(variables::kAllowCircularIncludesFrom, handler_map, v, dict);
   HandleProperty(variables::kSources, handler_map, v, dict);
+  HandleProperty(variables::kSwiftBridgeHeader, handler_map, v, dict);
   HandleProperty(variables::kPublic, handler_map, v, dict);
   HandleProperty(variables::kInputs, handler_map, v, dict);
   HandleProperty(variables::kConfigs, handler_map, v, dict);
@@ -373,6 +385,7 @@ bool PrintTarget(const Target* target,
   HandleProperty(variables::kCflagsCC, handler_map, v, dict);
   HandleProperty(variables::kCflagsObjC, handler_map, v, dict);
   HandleProperty(variables::kCflagsObjCC, handler_map, v, dict);
+  HandleProperty(variables::kSwiftflags, handler_map, v, dict);
   HandleProperty(variables::kDefines, handler_map, v, dict);
   HandleProperty(variables::kFrameworkDirs, handler_map, v, dict);
   HandleProperty(variables::kFrameworks, handler_map, v, dict);
@@ -386,6 +399,7 @@ bool PrintTarget(const Target* target,
   HandleProperty(variables::kDataKeys, handler_map, v, dict);
   HandleProperty(variables::kRebase, handler_map, v, dict);
   HandleProperty(variables::kWalkKeys, handler_map, v, dict);
+  HandleProperty(variables::kWeakFrameworks, handler_map, v, dict);
   HandleProperty(variables::kWriteOutputConversion, handler_map, v, dict);
 
 #undef HandleProperty
@@ -437,6 +451,7 @@ bool PrintConfig(const Config* config,
   HandleProperty(variables::kCflagsCC, handler_map, v, dict);
   HandleProperty(variables::kCflagsObjC, handler_map, v, dict);
   HandleProperty(variables::kCflagsObjCC, handler_map, v, dict);
+  HandleProperty(variables::kSwiftflags, handler_map, v, dict);
   HandleProperty(variables::kDefines, handler_map, v, dict);
   HandleProperty(variables::kFrameworkDirs, handler_map, v, dict);
   HandleProperty(variables::kFrameworks, handler_map, v, dict);
@@ -447,6 +462,7 @@ bool PrintConfig(const Config* config,
   HandleProperty(variables::kLibDirs, handler_map, v, dict);
   HandleProperty(variables::kPrecompiledHeader, handler_map, v, dict);
   HandleProperty(variables::kPrecompiledSource, handler_map, v, dict);
+  HandleProperty(variables::kWeakFrameworks, handler_map, v, dict);
 
 #undef HandleProperty
 
@@ -508,6 +524,7 @@ Possibilities for <what to show>
   testonly
   visibility
   walk_keys
+  weak_frameworks
 
   runtime_deps
       Compute all runtime deps for the given target. This is a computed list
@@ -519,9 +536,10 @@ Possibilities for <what to show>
       "--blame" to see the source of the dependency.
 
 Shared flags
+
 )"
 
-    ALL_TOOLCHAINS_SWITCH_HELP
+    DEFAULT_TOOLCHAIN_SWITCH_HELP
 
     R"(
   --format=json
@@ -532,8 +550,9 @@ Target flags
   --blame
       Used with any value specified on a config, this will name the config that
       causes that target to get the flag. This doesn't currently work for libs,
-      lib_dirs, frameworks and framework_dirs because those are inherited and
-      are more complicated to figure out the blame (patches welcome).
+      lib_dirs, frameworks, weak_frameworks and framework_dirs because those are
+      inherited and are more complicated to figure out the blame (patches
+      welcome).
 
 Configs
 
@@ -557,6 +576,7 @@ Printing deps
   --all
       Collects all recursive dependencies and prints a sorted flat list. Also
       usable with --tree (see below).
+
 )"
 
     TARGET_PRINTING_MODE_COMMAND_LINE_HELP
@@ -572,11 +592,13 @@ Printing deps
 
       Tree output can not be used with the filtering or output flags: --as,
       --type, --testonly.
+
 )"
 
     TARGET_TYPE_FILTER_COMMAND_LINE_HELP
 
-    R"(Note
+    R"(
+Note
 
   This command will show the full name of directories and source files, but
   when directories and source paths are written to the build file, they will be
@@ -599,7 +621,7 @@ Examples
 
 int RunDesc(const std::vector<std::string>& args) {
   if (args.size() != 2 && args.size() != 3) {
-    Err(Location(), "You're holding it wrong.",
+    Err(Location(), "Unknown command format. See \"gn help desc\"",
         "Usage: \"gn desc <out_dir> <target_name> [<what to display>]\"")
         .PrintToStdout();
     return 1;
@@ -623,7 +645,7 @@ int RunDesc(const std::vector<std::string>& args) {
   target_list.push_back(args[1]);
 
   if (!ResolveFromCommandLineInput(
-          setup, target_list, cmdline->HasSwitch(switches::kAllToolchains),
+          setup, target_list, cmdline->HasSwitch(switches::kDefaultToolchain),
           &target_matches, &config_matches, &toolchain_matches, &file_matches))
     return 1;
 

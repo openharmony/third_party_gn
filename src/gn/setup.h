@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "gn/build_settings.h"
 #include "gn/builder.h"
 #include "gn/label_pattern.h"
@@ -57,6 +56,12 @@ class Setup {
                bool force_create,
                const base::CommandLine& cmdline);
 
+  // Same as DoSetup() but used for tests to capture error output.
+  bool DoSetupWithErr(const std::string& build_dir,
+                      bool force_create,
+                      const base::CommandLine& cmdline,
+                      Err* err);
+
   // Runs the load, returning true on success. On failure, prints the error
   // and returns false. This includes both RunPreMessageLoop() and
   // RunPostMessageLoop().
@@ -100,6 +105,14 @@ class Setup {
     return check_patterns_.get();
   }
 
+  // Read from the .gn file, these are the targets *not* to check. If the .gn
+  // file does not specify anything, this will be null. If the .gn file
+  // specifies the empty list, this will be non-null but empty. At least one of
+  // check_patterns() and no_check_patterns() will be null.
+  const std::vector<LabelPattern>* no_check_patterns() const {
+    return no_check_patterns_.get();
+  }
+
   BuildSettings& build_settings() { return build_settings_; }
   Builder& builder() { return builder_; }
   LoaderImpl* loader() { return loader_.get(); }
@@ -117,35 +130,38 @@ class Setup {
   bool RunPostMessageLoop(const base::CommandLine& cmdline);
 
   // Fills build arguments. Returns true on success.
-  bool FillArguments(const base::CommandLine& cmdline);
+  bool FillArguments(const base::CommandLine& cmdline, Err* err);
 
   // Fills the build arguments from the command line or from the build arg file.
-  bool FillArgsFromCommandLine(const std::string& args);
-  bool FillArgsFromFile();
+  bool FillArgsFromCommandLine(const std::string& args, Err* err);
+  bool FillArgsFromFile(Err* err);
 
   // Given an already-loaded args_input_file_, parses and saves the resulting
   // arguments. Backend for the different FillArgs variants.
-  bool FillArgsFromArgsInputFile();
+  bool FillArgsFromArgsInputFile(Err* err);
 
   // Writes the build arguments to the build arg file.
   bool SaveArgsToFile();
 
-  // Fills the root directory into the settings. Returns true on success.
-  bool FillSourceDir(const base::CommandLine& cmdline);
+  // Fills the root directory into the settings. Returns true on success, or
+  // |err| filled out.
+  bool FillSourceDir(const base::CommandLine& cmdline, Err* err);
 
   // Fills the build directory given the value the user has specified.
   // Must happen after FillSourceDir so we can resolve source-relative
   // paths. If require_exists is false, it will fail if the dir doesn't exist.
-  bool FillBuildDir(const std::string& build_dir, bool require_exists);
+  bool FillBuildDir(const std::string& build_dir,
+                    bool require_exists,
+                    Err* err);
 
   // Fills the python path portion of the command line. On failure, sets
   // it to just "python".
-  bool FillPythonPath(const base::CommandLine& cmdline);
+  bool FillPythonPath(const base::CommandLine& cmdline, Err* err);
 
   // Run config file.
-  bool RunConfigFile();
+  bool RunConfigFile(Err* err);
 
-  bool FillOtherConfig(const base::CommandLine& cmdline);
+  bool FillOtherConfig(const base::CommandLine& cmdline, Err* err);
 
   BuildSettings build_settings_;
   scoped_refptr<LoaderImpl> loader_;
@@ -158,6 +174,7 @@ class Setup {
 
   // See getter for info.
   std::unique_ptr<std::vector<LabelPattern>> check_patterns_;
+  std::unique_ptr<std::vector<LabelPattern>> no_check_patterns_;
 
   Scheduler scheduler_;
 
@@ -190,7 +207,8 @@ class Setup {
   std::vector<Token> args_tokens_;
   std::unique_ptr<ParseNode> args_root_;
 
-  DISALLOW_COPY_AND_ASSIGN(Setup);
+  Setup(const Setup&) = delete;
+  Setup& operator=(const Setup&) = delete;
 };
 
 #endif  // TOOLS_GN_SETUP_H_

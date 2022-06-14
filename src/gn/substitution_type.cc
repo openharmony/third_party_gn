@@ -20,6 +20,7 @@ const SubstitutionTypes GeneralSubstitutions = {
     &SubstitutionOutput,
     &SubstitutionLabel,
     &SubstitutionLabelName,
+    &SubstitutionLabelNoToolchain,
     &SubstitutionRootGenDir,
     &SubstitutionRootOutDir,
     &SubstitutionOutputDir,
@@ -44,6 +45,7 @@ const SubstitutionTypes GeneralSubstitutions = {
 
     &SubstitutionBundleProductType,
     &SubstitutionBundlePartialInfoPlist,
+    &SubstitutionXcassetsCompilerFlags,
 
     &SubstitutionRspFileName,
 };
@@ -71,6 +73,8 @@ const Substitution SubstitutionSourceTargetRelative = {
 // do not vary on a per-file basis.
 const Substitution SubstitutionLabel = {"{{label}}", "label"};
 const Substitution SubstitutionLabelName = {"{{label_name}}", "label_name"};
+const Substitution SubstitutionLabelNoToolchain = {"{{label_no_toolchain}}",
+                                                   "label_no_toolchain"};
 const Substitution SubstitutionRootGenDir = {"{{root_gen_dir}}",
                                              "root_gen_dir"};
 const Substitution SubstitutionRootOutDir = {"{{root_out_dir}}",
@@ -100,6 +104,8 @@ const Substitution SubstitutionBundleProductType = {"{{bundle_product_type}}",
                                                     "product_type"};
 const Substitution SubstitutionBundlePartialInfoPlist = {
     "{{bundle_partial_info_plist}}", "partial_info_plist"};
+const Substitution SubstitutionXcassetsCompilerFlags = {
+    "{{xcasset_compiler_flags}}", "xcasset_compiler_flags"};
 
 // Used only for the args of actions.
 const Substitution SubstitutionRspFileName = {"{{response_file_name}}",
@@ -157,12 +163,15 @@ bool IsValidSourceSubstitution(const Substitution* type) {
 }
 
 bool IsValidScriptArgsSubstitution(const Substitution* type) {
-  return IsValidSourceSubstitution(type) || type == &SubstitutionRspFileName;
+  return IsValidSourceSubstitution(type) || type == &SubstitutionRspFileName ||
+         IsValidCompilerScriptArgsSubstitution(type) ||
+         IsValidRustScriptArgsSubstitution(type);
 }
 
 bool IsValidToolSubstitution(const Substitution* type) {
   return type == &SubstitutionLiteral || type == &SubstitutionOutput ||
          type == &SubstitutionLabel || type == &SubstitutionLabelName ||
+         type == &SubstitutionLabelNoToolchain ||
          type == &SubstitutionRootGenDir || type == &SubstitutionRootOutDir ||
          type == &SubstitutionTargetGenDir ||
          type == &SubstitutionTargetOutDir ||
@@ -176,7 +185,8 @@ bool IsValidCopySubstitution(const Substitution* type) {
 bool IsValidCompileXCassetsSubstitution(const Substitution* type) {
   return IsValidToolSubstitution(type) || type == &CSubstitutionLinkerInputs ||
          type == &SubstitutionBundleProductType ||
-         type == &SubstitutionBundlePartialInfoPlist;
+         type == &SubstitutionBundlePartialInfoPlist ||
+         type == &SubstitutionXcassetsCompilerFlags;
 }
 
 bool EnsureValidSubstitutions(const std::vector<const Substitution*>& types,

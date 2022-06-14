@@ -146,6 +146,22 @@ Value RunExecutable(Scope* scope,
                     BlockNode* block,
                     Err* err);
 
+extern const char kFilterExclude[];
+extern const char kFilterExclude_HelpShort[];
+extern const char kFilterExclude_Help[];
+Value RunFilterExclude(Scope* scope,
+                       const FunctionCallNode* function,
+                       const std::vector<Value>& args,
+                       Err* err);
+
+extern const char kFilterInclude[];
+extern const char kFilterInclude_HelpShort[];
+extern const char kFilterInclude_Help[];
+Value RunFilterInclude(Scope* scope,
+                       const FunctionCallNode* function,
+                       const std::vector<Value>& args,
+                       Err* err);
+
 extern const char kForEach[];
 extern const char kForEach_HelpShort[];
 extern const char kForEach_Help[];
@@ -311,14 +327,6 @@ Value RunSetDefaultToolchain(Scope* scope,
                              const FunctionCallNode* function,
                              const std::vector<Value>& args,
                              Err* err);
-
-extern const char kSetSourcesAssignmentFilter[];
-extern const char kSetSourcesAssignmentFilter_HelpShort[];
-extern const char kSetSourcesAssignmentFilter_Help[];
-Value RunSetSourcesAssignmentFilter(Scope* scope,
-                                    const FunctionCallNode* function,
-                                    const std::vector<Value>& args,
-                                    Err* err);
 
 extern const char kSharedLibrary[];
 extern const char kSharedLibrary_HelpShort[];
@@ -539,7 +547,7 @@ class NonNestableBlock {
   const char* type_description_;
 
   // Set to true when the key is added to the scope so we don't try to
-  // delete nonexistant keys which will cause assertions.
+  // delete nonexistent keys which will cause assertions.
   bool key_added_;
 };
 

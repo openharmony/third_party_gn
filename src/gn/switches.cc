@@ -60,7 +60,7 @@ const char kDotfile_HelpShort[] =
 const char kDotfile_Help[] =
     R"(--dotfile: Override the name of the ".gn" file.
 
-  Normally GN loads the ".gn"file  from the source root for some basic
+  Normally GN loads the ".gn" file from the source root for some basic
   configuration (see "gn help dotfile"). This flag allows you to
   use a different file.
 )";
@@ -99,6 +99,16 @@ const char kNoColor[] = "nocolor";
 const char kNoColor_HelpShort[] = "--nocolor: Force non-colored output.";
 const char kNoColor_Help[] = COLOR_HELP_LONG;
 
+const char kNinjaExecutable[] = "ninja-executable";
+const char kNinjaExecutable_HelpShort[] =
+    "--ninja-executable: Set the Ninja executable.";
+const char kNinjaExecutable_Help[] =
+    R"(--ninja-executable: Set the Ninja executable.
+
+  When set specifies the Ninja executable that will be used to perform some
+  post-processing on the generated files for more consistent builds.
+)";
+
 const char kScriptExecutable[] = "script-executable";
 const char kScriptExecutable_HelpShort[] =
     "--script-executable: Set the executable used to execute scripts.";
@@ -109,41 +119,8 @@ const char kScriptExecutable_Help[] =
   action targets and exec_script calls. By default GN searches the
   PATH for Python to execute these scripts.
 
-  If set to the empty string, the path specified in action targets
-  and exec_script calls will be executed directly.
-)";
-
-const char kMetaDataKeys[] = "data";
-const char kMetaDataKeys_HelpShort[] =
-    "--data: list of data keys to concatenate when collecting metadata.";
-const char kMetaDataKeys_Help[] =
-    R"(--data: list of data keys to concatenate when collecting metadata.
-
-  Data keys identify which variables in the given targets' `metadata`
-  scopes should be collected. At least one data key must be specified.
-)";
-
-const char kMetaWalkKeys[] = "walk";
-const char kMetaWalkKeys_HelpShort[] =
-    "--walk: list of walk keys to traverse when collecting metadata.";
-const char kMetaWalkKeys_Help[] =
-    R"(--walk: list of walk keys to traverse when collecting metadata.
-
-  Walk keys identify which variables in the given targets' `metadata`
-  scopes contain the list of dependencies to walk next. Absence of any
-  walk keys indicates that all deps and data_deps should be walked.
-)";
-
-const char kMetaRebaseFiles[] = "rebase-files";
-const char kMetaRebaseFiles_HelpShort[] =
-    "--rebase-files (boolean): whether to rebase the paths of the collected "
-    "metadata.";
-const char kMetaRebaseFiles_Help[] =
-    R"(--rebase-files: whether to rebase the paths of the collected metadata.
-
-  This flag indicates whether or not to rebase the collected results onto their
-  declaring source directory path. Note that this requires the data key(s) to
-  contain only lists of strings, which will be interpreted as file names.
+  If set to the empty string, the path of scripts specified in action
+  targets and exec_script calls will be executed directly.
 )";
 
 const char kQuiet[] = "q";
@@ -173,6 +150,37 @@ Examples
   gn gen //out/Default --root=/home/baracko/src
 
   gn desc //out/Default --root="C:\Users\BObama\My Documents\foo"
+)";
+
+const char kRootTarget[] = "root-target";
+const char kRootTarget_HelpShort[] =
+    "--root-target: Override the root target.";
+const char kRootTarget_Help[] =
+    R"(--root-target: Override the root target.
+
+  The root target is the target initially loaded to begin population of the
+  build graph. It defaults to "//:" which normally causes the "//BUILD.gn" file
+  to be loaded. It can be specified in the .gn file via the "root" variable (see
+  "gn help dotfile").
+
+  If specified, the value of this switch will be take precedence over the value
+  in ".gn". The target name (after the colon) is ignored, only the directory
+  name is required. Relative paths will be resolved relative to the current "//"
+  directory.
+
+  Specifying a different initial BUILD.gn file does not change the meaning of
+  the source root (the "//" directory) which can be independently set via the
+  --root switch. It also does not prevent the build file located at "//BUILD.gn"
+  from being loaded if a target in the build references that directory.
+
+  One use-case of this feature is to load a different set of initial targets
+  from project that uses GN without modifying any files.
+
+Examples
+
+  gn gen //out/Default --root-target="//third_party/icu"
+
+  gn gen //out/Default --root-target="//third_party/grpc"
 )";
 
 const char kRuntimeDepsListFile[] = "runtime-deps-list-file";
@@ -273,8 +281,9 @@ const char kVersion_HelpShort[] =
 // immediately if this switch is used.
 const char kVersion_Help[] = "";
 
-const char kAllToolchains[] = "all-toolchains";
+const char kDefaultToolchain[] = "default-toolchain";
 
+const char kRegeneration[] = "regeneration";
 // -----------------------------------------------------------------------------
 
 SwitchInfo::SwitchInfo() : short_help(""), long_help("") {}
@@ -293,8 +302,10 @@ const SwitchInfoMap& GetSwitches() {
     INSERT_VARIABLE(Dotfile)
     INSERT_VARIABLE(FailOnUnusedArgs)
     INSERT_VARIABLE(Markdown)
+    INSERT_VARIABLE(NinjaExecutable)
     INSERT_VARIABLE(NoColor)
     INSERT_VARIABLE(Root)
+    INSERT_VARIABLE(RootTarget)
     INSERT_VARIABLE(Quiet)
     INSERT_VARIABLE(RuntimeDepsListFile)
     INSERT_VARIABLE(ScriptExecutable)

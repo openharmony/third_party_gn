@@ -15,14 +15,16 @@
 #include "gn/input_file.h"
 #include "gn/parse_tree.h"
 #include "gn/runtime_deps.h"
+#include "gn/rust_variables.h"
 #include "gn/scope.h"
 #include "gn/settings.h"
 #include "gn/standard_out.h"
 #include "gn/substitution_writer.h"
+#include "gn/swift_variables.h"
 #include "gn/variables.h"
 
 // Example structure of Value for single target
-// (not applicable or empty fields will be ommitted depending on target type)
+// (not applicable or empty fields will be omitted depending on target type)
 //
 // target_properties = {
 //   "type" : "output_type", // matching Target::GetStringForOutputType
@@ -35,19 +37,22 @@
 //   "public" : either "*" or [ list of public headers],
 //   "inputs" : [ list of inputs for target ],
 //   "configs" : [ list of configs for this target ],
-//   "public_configs" : [ list of public configs for this taget],
+//   "public_configs" : [ list of public configs for this target],
 //   "all_dependent_configs", [ list of all dependent configs for this target],
 //   "script" : "script for action targets",
 //   "args" : [ argument list for action targets ],
 //   "depfile : "file name for action input dependencies",
 //   "outputs" : [ list of target outputs ],
 //   "arflags", "asmflags", "cflags", "cflags_c",
-//   "clfags_cc", "cflags_objc", "clfags_objcc" : [ list of flags],
+//   "cflags_cc", "cflags_objc", "cflags_objcc",
+//   "rustflags" : [ list of flags],
+//   "rustenv" : [ list of Rust environment variables ],
 //   "defines" : [ list of preprocessor definitions ],
 //   "include_dirs" : [ list of include directories ],
 //   "precompiled_header" : "name of precompiled header file",
 //   "precompiled_source" : "path to precompiled source",
 //   "deps : [ list of target dependencies ],
+//   "gen_deps : [ list of generate dependencies ],
 //   "libs" : [ list of libraries ],
 //   "lib_dirs" : [ list of library directories ]
 //   "metadata" : [ dictionary of target metadata values ]
@@ -61,14 +66,20 @@
 // }
 //
 // Optionally, if "what" is specified while generating description, two other
-// properties can be requested that are not included by default
+// properties can be requested that are not included by default. First the
+// runtime dependendencies (see "gn help runtime_deps"):
 //
-// "runtime_deps" : [list of computed runtime dependencies]
-// "source_outputs" : {
-//    "source_file x" : [ list of outputs for source file x ]
-//    "source_file y" : [ list of outputs for source file y ]
-//    ...
-// }
+//   "runtime_deps" : [list of computed runtime dependencies]
+//
+// Second, for targets whose sources map to outputs (binary targets,
+// action_foreach, and copies with non-constant outputs), the "source_outputs"
+// indicates the mapping from source to output file(s):
+//
+//   "source_outputs" : {
+//      "source_file x" : [ list of outputs for source file x ]
+//      "source_file y" : [ list of outputs for source file y ]
+//      ...
+//   }
 
 namespace {
 
@@ -87,20 +98,16 @@ std::string FormatSourceDir(const SourceDir& dir) {
   return dir.value();
 }
 
-void RecursiveCollectChildDeps(const Target* target,
-                               std::set<const Target*>* result);
+void RecursiveCollectChildDeps(const Target* target, TargetSet* result);
 
-void RecursiveCollectDeps(const Target* target,
-                          std::set<const Target*>* result) {
-  if (result->find(target) != result->end())
+void RecursiveCollectDeps(const Target* target, TargetSet* result) {
+  if (!result->add(target))
     return;  // Already did this target.
-  result->insert(target);
 
   RecursiveCollectChildDeps(target, result);
 }
 
-void RecursiveCollectChildDeps(const Target* target,
-                               std::set<const Target*>* result) {
+void RecursiveCollectChildDeps(const Target* target, TargetSet* result) {
   for (const auto& pair : target->GetDeps(Target::DEPS_ALL))
     RecursiveCollectDeps(pair.ptr, result);
 }
@@ -129,7 +136,7 @@ class BaseDescBuilder {
     for (const auto& v : vector)
       res->Append(RenderValue(v));
 
-    return std::move(res);
+    return res;
   }
 
   ValuePtr RenderValue(const std::string& s, bool optional = false) {
@@ -246,6 +253,11 @@ class ConfigDescBuilder : public BaseDescBuilder {
       res->SetWithoutPathExpansion(variables::kConfigs, std::move(configs));
     }
 
+    if (what(variables::kVisibility)) {
+      res->SetWithoutPathExpansion(variables::kVisibility,
+                                   config_->visibility().AsValue());
+    }
+
 #define CONFIG_VALUE_ARRAY_HANDLER(name, type)                        \
   if (what(#name)) {                                                  \
     ValuePtr ptr =                                                    \
@@ -262,11 +274,14 @@ class ConfigDescBuilder : public BaseDescBuilder {
     CONFIG_VALUE_ARRAY_HANDLER(cflags_objc, std::string)
     CONFIG_VALUE_ARRAY_HANDLER(cflags_objcc, std::string)
     CONFIG_VALUE_ARRAY_HANDLER(defines, std::string)
+    CONFIG_VALUE_ARRAY_HANDLER(frameworks, std::string)
+    CONFIG_VALUE_ARRAY_HANDLER(framework_dirs, SourceDir)
     CONFIG_VALUE_ARRAY_HANDLER(include_dirs, SourceDir)
     CONFIG_VALUE_ARRAY_HANDLER(inputs, SourceFile)
     CONFIG_VALUE_ARRAY_HANDLER(ldflags, std::string)
     CONFIG_VALUE_ARRAY_HANDLER(lib_dirs, SourceDir)
     CONFIG_VALUE_ARRAY_HANDLER(libs, LibFile)
+    CONFIG_VALUE_ARRAY_HANDLER(swiftflags, std::string)
 
 #undef CONFIG_VALUE_ARRAY_HANDLER
 
@@ -320,10 +335,27 @@ class TargetDescBuilder : public BaseDescBuilder {
     }
 
     if (target_->source_types_used().RustSourceUsed()) {
-      res->SetWithoutPathExpansion(
-          "crate_root", RenderValue(target_->rust_values().crate_root()));
-      res->SetKey("crate_name",
-                  base::Value(target_->rust_values().crate_name()));
+      if (what(variables::kRustCrateRoot)) {
+        res->SetWithoutPathExpansion(
+            variables::kRustCrateRoot,
+            RenderValue(target_->rust_values().crate_root()));
+      }
+      if (what(variables::kRustCrateName)) {
+        res->SetKey(variables::kRustCrateName,
+                    base::Value(target_->rust_values().crate_name()));
+      }
+    }
+
+    if (target_->source_types_used().SwiftSourceUsed()) {
+      if (what(variables::kSwiftBridgeHeader)) {
+        res->SetWithoutPathExpansion(
+            variables::kSwiftBridgeHeader,
+            RenderValue(target_->swift_values().bridge_header()));
+      }
+      if (what(variables::kSwiftModuleName)) {
+        res->SetKey(variables::kSwiftModuleName,
+                    base::Value(target_->swift_values().module_name()));
+      }
     }
 
     // General target meta variables.
@@ -458,25 +490,41 @@ class TargetDescBuilder : public BaseDescBuilder {
       FillInBundle(res.get());
 
     if (is_binary_output) {
-#define CONFIG_VALUE_ARRAY_HANDLER(name, type)                    \
-  if (what(#name)) {                                              \
-    ValuePtr ptr = RenderConfigValues<type>(&ConfigValues::name); \
-    if (ptr) {                                                    \
-      res->SetWithoutPathExpansion(#name, std::move(ptr));        \
-    }                                                             \
+#define CONFIG_VALUE_ARRAY_HANDLER(name, type, config)                    \
+  if (what(#name)) {                                                      \
+    ValuePtr ptr = RenderConfigValues<type>(config, &ConfigValues::name); \
+    if (ptr) {                                                            \
+      res->SetWithoutPathExpansion(#name, std::move(ptr));                \
+    }                                                                     \
   }
-      CONFIG_VALUE_ARRAY_HANDLER(arflags, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(asmflags, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(cflags, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(cflags_c, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(cflags_cc, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(cflags_objc, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(cflags_objcc, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(rustflags, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(defines, std::string)
-      CONFIG_VALUE_ARRAY_HANDLER(include_dirs, SourceDir)
-      CONFIG_VALUE_ARRAY_HANDLER(inputs, SourceFile)
-      CONFIG_VALUE_ARRAY_HANDLER(ldflags, std::string)
+      CONFIG_VALUE_ARRAY_HANDLER(arflags, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(asmflags, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(cflags, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(cflags_c, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(cflags_cc, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(cflags_objc, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(cflags_objcc, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(rustflags, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(rustenv, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(defines, std::string,
+                                 kRecursiveWriterSkipDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(include_dirs, SourceDir,
+                                 kRecursiveWriterSkipDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(inputs, SourceFile,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(ldflags, std::string,
+                                 kRecursiveWriterKeepDuplicates)
+      CONFIG_VALUE_ARRAY_HANDLER(swiftflags, std::string,
+                                 kRecursiveWriterKeepDuplicates)
 #undef CONFIG_VALUE_ARRAY_HANDLER
 
       // Libs and lib_dirs are handled specially below.
@@ -522,6 +570,9 @@ class TargetDescBuilder : public BaseDescBuilder {
     if (what(variables::kDeps))
       res->SetWithoutPathExpansion(variables::kDeps, RenderDeps());
 
+    if (what(variables::kGenDeps) && !target_->gen_deps().empty())
+      res->SetWithoutPathExpansion(variables::kGenDeps, RenderGenDeps());
+
     // Runtime deps are special, print only when explicitly asked for and not in
     // overview mode.
     if (what_.find("runtime_deps") != what_.end())
@@ -534,7 +585,7 @@ class TargetDescBuilder : public BaseDescBuilder {
     // Libs can be part of any target and get recursively pushed up the chain,
     // so display them regardless of target type.
     if (what(variables::kLibs)) {
-      const OrderedSet<LibFile>& all_libs = target_->all_libs();
+      const UniqueVector<LibFile>& all_libs = target_->all_libs();
       if (!all_libs.empty()) {
         auto libs = std::make_unique<base::ListValue>();
         for (size_t i = 0; i < all_libs.size(); i++)
@@ -544,7 +595,7 @@ class TargetDescBuilder : public BaseDescBuilder {
     }
 
     if (what(variables::kLibDirs)) {
-      const OrderedSet<SourceDir>& all_lib_dirs = target_->all_lib_dirs();
+      const UniqueVector<SourceDir>& all_lib_dirs = target_->all_lib_dirs();
       if (!all_lib_dirs.empty()) {
         auto lib_dirs = std::make_unique<base::ListValue>();
         for (size_t i = 0; i < all_lib_dirs.size(); i++)
@@ -560,6 +611,16 @@ class TargetDescBuilder : public BaseDescBuilder {
         for (size_t i = 0; i < all_frameworks.size(); i++)
           frameworks->AppendString(all_frameworks[i]);
         res->SetWithoutPathExpansion(variables::kFrameworks,
+                                     std::move(frameworks));
+      }
+    }
+    if (what(variables::kWeakFrameworks)) {
+      const auto& weak_frameworks = target_->all_weak_frameworks();
+      if (!weak_frameworks.empty()) {
+        auto frameworks = std::make_unique<base::ListValue>();
+        for (size_t i = 0; i < weak_frameworks.size(); i++)
+          frameworks->AppendString(weak_frameworks[i]);
+        res->SetWithoutPathExpansion(variables::kWeakFrameworks,
                                      std::move(frameworks));
       }
     }
@@ -585,7 +646,7 @@ class TargetDescBuilder : public BaseDescBuilder {
   // set is null, all dependencies will be printed.
   void RecursivePrintDeps(base::ListValue* out,
                           const Target* target,
-                          std::set<const Target*>* seen_targets,
+                          TargetSet* seen_targets,
                           int indent_level) {
     // Combine all deps into one sorted list.
     std::vector<LabelTargetPair> sorted_deps;
@@ -602,10 +663,7 @@ class TargetDescBuilder : public BaseDescBuilder {
 
       bool print_children = true;
       if (seen_targets) {
-        if (seen_targets->find(cur_dep) == seen_targets->end()) {
-          // New target, mark it visited.
-          seen_targets->insert(cur_dep);
-        } else {
+        if (!seen_targets->add(cur_dep)) {
           // Already seen.
           print_children = false;
           // Only print "..." if something is actually elided, which means that
@@ -633,7 +691,7 @@ class TargetDescBuilder : public BaseDescBuilder {
         RecursivePrintDeps(res.get(), target_, nullptr, 0);
       } else {
         // Don't recurse into duplicates.
-        std::set<const Target*> seen_targets;
+        TargetSet seen_targets;
         RecursivePrintDeps(res.get(), target_, &seen_targets, 0);
       }
     } else {  // not tree
@@ -641,7 +699,7 @@ class TargetDescBuilder : public BaseDescBuilder {
       // Collect the deps to display.
       if (all_) {
         // Show all dependencies.
-        std::set<const Target*> all_deps;
+        TargetSet all_deps;
         RecursiveCollectChildDeps(target_, &all_deps);
         commands::FilterAndPrintTargetSet(all_deps, res.get());
       } else {
@@ -654,7 +712,19 @@ class TargetDescBuilder : public BaseDescBuilder {
       }
     }
 
-    return std::move(res);
+    return res;
+  }
+
+  ValuePtr RenderGenDeps() {
+    auto res = std::make_unique<base::ListValue>();
+    Label default_tc = target_->settings()->default_toolchain_label();
+    std::vector<std::string> gen_deps;
+    for (const auto& pair : target_->gen_deps())
+      gen_deps.push_back(pair.label.GetUserVisibleName(default_tc));
+    std::sort(gen_deps.begin(), gen_deps.end());
+    for (const auto& dep : gen_deps)
+      res->AppendString(dep);
+    return res;
   }
 
   ValuePtr RenderRuntimeDeps() {
@@ -680,10 +750,23 @@ class TargetDescBuilder : public BaseDescBuilder {
       res->AppendString(str + pair.first.value());
     }
 
-    return std::move(res);
+    return res;
   }
 
   void FillInSourceOutputs(base::DictionaryValue* res) {
+    // Only include "source outputs" if there are sources that map to outputs.
+    // Things like actions have constant per-target outputs that don't depend on
+    // the list of sources. These don't need source outputs.
+    if (target_->output_type() != Target::ACTION_FOREACH &&
+        target_->output_type() != Target::COPY_FILES && !target_->IsBinary())
+      return;  // Everything else has constant outputs.
+
+    // "copy" targets may have patterns or not. If there's only one file, the
+    // user can specify a constant output name.
+    if (target_->output_type() == Target::COPY_FILES &&
+        target_->action_values().outputs().required_types().empty())
+      return;  // Constant output.
+
     auto dict = std::make_unique<base::DictionaryValue>();
     for (const auto& source : target_->sources()) {
       std::vector<OutputFile> outputs;
@@ -728,53 +811,28 @@ class TargetDescBuilder : public BaseDescBuilder {
   }
 
   void FillInOutputs(base::DictionaryValue* res) {
-    if (target_->output_type() == Target::ACTION) {
-      auto list = std::make_unique<base::ListValue>();
-      for (const auto& elem : target_->action_values().outputs().list())
-        list->AppendString(elem.AsString());
+    std::vector<SourceFile> output_files;
+    Err err;
+    if (!target_->GetOutputsAsSourceFiles(LocationRange(), true, &output_files,
+                                          &err)) {
+      err.PrintToStdout();
+      return;
+    }
+    res->SetWithoutPathExpansion(variables::kOutputs,
+                                 RenderValue(output_files));
 
-      res->SetWithoutPathExpansion(variables::kOutputs, std::move(list));
-    } else if (target_->output_type() == Target::CREATE_BUNDLE ||
-               target_->output_type() == Target::GENERATED_FILE) {
-      Err err;
-      std::vector<SourceFile> output_files;
-      if (!target_->bundle_data().GetOutputsAsSourceFiles(
-              target_->settings(), target_, &output_files, &err)) {
-        err.PrintToStdout();
-      }
-      res->SetWithoutPathExpansion(variables::kOutputs,
-                                   RenderValue(output_files));
-    } else if (target_->output_type() == Target::ACTION_FOREACH ||
-               target_->output_type() == Target::COPY_FILES) {
+    // Write some extra data for certain output types.
+    if (target_->output_type() == Target::ACTION_FOREACH ||
+        target_->output_type() == Target::COPY_FILES) {
       const SubstitutionList& outputs = target_->action_values().outputs();
       if (!outputs.required_types().empty()) {
+        // Write out the output patterns if there are any.
         auto patterns = std::make_unique<base::ListValue>();
         for (const auto& elem : outputs.list())
           patterns->AppendString(elem.AsString());
 
         res->SetWithoutPathExpansion("output_patterns", std::move(patterns));
       }
-      std::vector<SourceFile> output_files;
-      SubstitutionWriter::ApplyListToSources(target_, target_->settings(),
-                                             outputs, target_->sources(),
-                                             &output_files);
-      res->SetWithoutPathExpansion(variables::kOutputs,
-                                   RenderValue(output_files));
-    } else {
-      DCHECK(target_->IsBinary());
-      const Tool* tool =
-          target_->toolchain()->GetToolForTargetFinalOutput(target_);
-
-      std::vector<OutputFile> output_files;
-      SubstitutionWriter::ApplyListToLinkerAsOutputFile(
-          target_, tool, tool->outputs(), &output_files);
-      std::vector<SourceFile> output_files_as_source_file;
-      for (const OutputFile& output_file : output_files)
-        output_files_as_source_file.push_back(
-            output_file.AsSourceFile(target_->settings()->build_settings()));
-
-      res->SetWithoutPathExpansion(variables::kOutputs,
-                                   RenderValue(output_files_as_source_file));
     }
   }
 
@@ -782,8 +840,10 @@ class TargetDescBuilder : public BaseDescBuilder {
   // attribution.
   // This should match RecursiveTargetConfigToStream in the order it traverses.
   template <class T>
-  ValuePtr RenderConfigValues(const std::vector<T>& (ConfigValues::*getter)()
+  ValuePtr RenderConfigValues(RecursiveWriterConfig writer_config,
+                              const std::vector<T>& (ConfigValues::*getter)()
                                   const) {
+    std::set<T> seen;
     auto res = std::make_unique<base::ListValue>();
     for (ConfigValuesIterator iter(target_); !iter.done(); iter.Next()) {
       const std::vector<T>& vec = (iter.cur().*getter)();
@@ -812,7 +872,24 @@ class TargetDescBuilder : public BaseDescBuilder {
         }
       }
 
+      // If blame is on, then do not de-dup across configs.
+      if (blame_)
+        seen.clear();
+
       for (const T& val : vec) {
+        switch (writer_config) {
+          case kRecursiveWriterKeepDuplicates:
+            break;
+
+          case kRecursiveWriterSkipDuplicates: {
+            if (seen.find(val) != seen.end())
+              continue;
+
+            seen.insert(val);
+            break;
+          }
+        }
+
         ValuePtr rendered = RenderValue(val);
         std::string str;
         // Indent string values in blame mode

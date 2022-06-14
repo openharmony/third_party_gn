@@ -302,7 +302,7 @@ Args::ValueWithOverrideMap Args::GetAllArguments() const {
 void Args::SetSystemVarsLocked(Scope* dest) const {
   // Host OS.
   const char* os = nullptr;
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MSYS)
   os = "win";
 #elif defined(OS_MACOSX)
   os = "mac";
@@ -316,6 +316,12 @@ void Args::SetSystemVarsLocked(Scope* dest) const {
   os = "openbsd";
 #elif defined(OS_HAIKU)
   os = "haiku";
+#elif defined(OS_SOLARIS)
+  os = "solaris";
+#elif defined(OS_NETBSD)
+  os = "netbsd";
+#elif defined(OS_ZOS)
+  os = "zos";
 #else
 #error Unknown OS type.
 #endif
@@ -333,6 +339,8 @@ void Args::SetSystemVarsLocked(Scope* dest) const {
   static const char kPPC64[] = "ppc64";
   static const char kRISCV32[] = "riscv32";
   static const char kRISCV64[] = "riscv64";
+  static const char kE2K[] = "e2k";
+  static const char kLOONG64[] = "loong64";
   const char* arch = nullptr;
 
   // Set the host CPU architecture based on the underlying OS, not
@@ -342,10 +350,10 @@ void Args::SetSystemVarsLocked(Scope* dest) const {
     arch = kX86;
   else if (os_arch == "x86_64")
     arch = kX64;
+  else if (os_arch == "aarch64" || os_arch == "arm64")
+    arch = kArm64;
   else if (os_arch.substr(0, 3) == "arm")
     arch = kArm;
-  else if (os_arch == "aarch64")
-    arch = kArm64;
   else if (os_arch == "mips")
     arch = kMips;
   else if (os_arch == "mips64")
@@ -361,6 +369,10 @@ void Args::SetSystemVarsLocked(Scope* dest) const {
     arch = kRISCV32;
   else if (os_arch == "riscv64")
     arch = kRISCV64;
+  else if (os_arch == "e2k")
+    arch = kE2K;
+  else if (os_arch == "loongarch64")
+    arch = kLOONG64;
   else
     CHECK(false) << "OS architecture not handled. (" << os_arch << ")";
 
@@ -389,7 +401,7 @@ void Args::SetSystemVarsLocked(Scope* dest) const {
   declared_arguments[variables::kTargetCpu] = empty_string;
 
   // Mark these variables used so the build config file can override them
-  // without geting a warning about overwriting an unused variable.
+  // without getting a warning about overwriting an unused variable.
   dest->MarkUsed(variables::kHostCpu);
   dest->MarkUsed(variables::kCurrentCpu);
   dest->MarkUsed(variables::kTargetCpu);

@@ -50,7 +50,8 @@ void NinjaBinaryTargetWriter::Run() {
   writer.Run();
 }
 
-OutputFile NinjaBinaryTargetWriter::WriteInputsStampAndGetDep() const {
+std::vector<OutputFile> NinjaBinaryTargetWriter::WriteInputsStampAndGetDep(
+    size_t num_stamp_uses) const {
   CHECK(target_->toolchain()) << "Toolchain not set on target "
                               << target_->label().GetUserVisibleName(true);
 
@@ -62,12 +63,23 @@ OutputFile NinjaBinaryTargetWriter::WriteInputsStampAndGetDep() const {
   }
 
   if (inputs.size() == 0)
-    return OutputFile();  // No inputs
+    return std::vector<OutputFile>();  // No inputs
 
   // If we only have one input, return it directly instead of writing a stamp
   // file for it.
-  if (inputs.size() == 1)
-    return OutputFile(settings_->build_settings(), *inputs[0]);
+  if (inputs.size() == 1) {
+    return std::vector<OutputFile>{
+      OutputFile(settings_->build_settings(), *inputs[0])};
+  }
+
+  std::vector<OutputFile> outs;
+  for (const SourceFile* source : inputs)
+    outs.push_back(OutputFile(settings_->build_settings(), *source));
+
+  // If there are multiple inputs, but the stamp file would be referenced only
+  // once, don't write it but depend on the inputs directly.
+  if (num_stamp_uses == 1u)
+    return outs;
 
   // Make a stamp file.
   OutputFile stamp_file =
@@ -87,7 +99,7 @@ OutputFile NinjaBinaryTargetWriter::WriteInputsStampAndGetDep() const {
   }
 
   out_ << std::endl;
-  return stamp_file;
+  return {stamp_file};
 }
 
 void NinjaBinaryTargetWriter::WriteSourceSetStamp(
@@ -96,53 +108,44 @@ void NinjaBinaryTargetWriter::WriteSourceSetStamp(
   // depend on this will reference the object files directly. However, writing
   // this rule allows the user to type the name of the target and get a build
   // which can be convenient for development.
-  UniqueVector<OutputFile> extra_object_files;
-  UniqueVector<const Target*> linkable_deps;
-  UniqueVector<const Target*> non_linkable_deps;
-  UniqueVector<const Target*> framework_deps;
-  GetDeps(&extra_object_files, &linkable_deps, &non_linkable_deps,
-          &framework_deps);
+  ClassifiedDeps classified_deps = GetClassifiedDeps();
 
   // The classifier should never put extra object files in a source sets: any
   // source sets that we depend on should appear in our non-linkable deps
   // instead.
-  DCHECK(extra_object_files.empty());
+  DCHECK(classified_deps.extra_object_files.empty());
 
   std::vector<OutputFile> order_only_deps;
-  for (auto* dep : non_linkable_deps)
+  for (auto* dep : classified_deps.non_linkable_deps)
     order_only_deps.push_back(dep->dependency_output_file());
 
   WriteStampForTarget(object_files, order_only_deps);
 }
 
-void NinjaBinaryTargetWriter::GetDeps(
-    UniqueVector<OutputFile>* extra_object_files,
-    UniqueVector<const Target*>* linkable_deps,
-    UniqueVector<const Target*>* non_linkable_deps,
-    UniqueVector<const Target*>* framework_deps) const {
+NinjaBinaryTargetWriter::ClassifiedDeps
+NinjaBinaryTargetWriter::GetClassifiedDeps() const {
+  ClassifiedDeps classified_deps;
+
   // Normal public/private deps.
   for (const auto& pair : target_->GetDeps(Target::DEPS_LINKED)) {
-    ClassifyDependency(pair.ptr, extra_object_files, linkable_deps,
-                       non_linkable_deps, framework_deps);
+    ClassifyDependency(pair.ptr, &classified_deps);
   }
 
   // Inherited libraries.
   for (auto* inherited_target : target_->inherited_libraries().GetOrdered()) {
-    ClassifyDependency(inherited_target, extra_object_files, linkable_deps,
-                       non_linkable_deps, framework_deps);
+    ClassifyDependency(inherited_target, &classified_deps);
   }
 
   // Data deps.
   for (const auto& data_dep_pair : target_->data_deps())
-    non_linkable_deps->push_back(data_dep_pair.ptr);
+    classified_deps.non_linkable_deps.push_back(data_dep_pair.ptr);
+
+  return classified_deps;
 }
 
 void NinjaBinaryTargetWriter::ClassifyDependency(
     const Target* dep,
-    UniqueVector<OutputFile>* extra_object_files,
-    UniqueVector<const Target*>* linkable_deps,
-    UniqueVector<const Target*>* non_linkable_deps,
-    UniqueVector<const Target*>* framework_deps) const {
+    ClassifiedDeps* classified_deps) const {
   // Only the following types of outputs have libraries linked into them:
   //  EXECUTABLE
   //  SHARED_LIBRARY
@@ -153,14 +156,25 @@ void NinjaBinaryTargetWriter::ClassifyDependency(
   // don't link at all.
   bool can_link_libs = target_->IsFinal();
 
-  if (dep->output_type() == Target::SOURCE_SET ||
-      // If a complete static library depends on an incomplete static library,
-      // manually link in the object files of the dependent library as if it
-      // were a source set. This avoids problems with braindead tools such as
-      // ar which don't properly link dependent static libraries.
-      (target_->complete_static_lib() &&
-       (dep->output_type() == Target::STATIC_LIBRARY &&
-        !dep->complete_static_lib()))) {
+  if (can_link_libs && dep->builds_swift_module())
+    classified_deps->swiftmodule_deps.push_back(dep);
+
+  if (target_->source_types_used().RustSourceUsed() &&
+      (target_->output_type() == Target::RUST_LIBRARY ||
+       target_->output_type() == Target::STATIC_LIBRARY) &&
+      dep->IsLinkable()) {
+    // Rust libraries and static libraries aren't final, but need to have the
+    // link lines of all transitive deps specified.
+    classified_deps->linkable_deps.push_back(dep);
+  } else if (dep->output_type() == Target::SOURCE_SET ||
+             // If a complete static library depends on an incomplete static
+             // library, manually link in the object files of the dependent
+             // library as if it were a source set. This avoids problems with
+             // braindead tools such as ar which don't properly link dependent
+             // static libraries.
+             (target_->complete_static_lib() &&
+              (dep->output_type() == Target::STATIC_LIBRARY &&
+               !dep->complete_static_lib()))) {
     // Source sets have their object files linked into final targets
     // (shared libraries, executables, loadable modules, and complete static
     // libraries). Intermediate static libraries and other source sets
@@ -168,52 +182,106 @@ void NinjaBinaryTargetWriter::ClassifyDependency(
     // set can easily get linked more than once which will cause
     // multiple definition errors.
     if (can_link_libs)
-      AddSourceSetFiles(dep, extra_object_files);
+      AddSourceSetFiles(dep, &classified_deps->extra_object_files);
 
     // Add the source set itself as a non-linkable dependency on the current
     // target. This will make sure that anything the source set's stamp file
     // depends on (like data deps) are also built before the current target
     // can be complete. Otherwise, these will be skipped since this target
     // will depend only on the source set's object files.
-    non_linkable_deps->push_back(dep);
-  } else if (target_->output_type() == Target::RUST_LIBRARY &&
-             dep->IsLinkable()) {
-    // Rust libraries aren't final, but need to have the link lines of all
-    // transitive deps specified.
-    linkable_deps->push_back(dep);
+    classified_deps->non_linkable_deps.push_back(dep);
   } else if (target_->complete_static_lib() && dep->IsFinal()) {
-    non_linkable_deps->push_back(dep);
+    classified_deps->non_linkable_deps.push_back(dep);
   } else if (can_link_libs && dep->IsLinkable()) {
-    linkable_deps->push_back(dep);
+    classified_deps->linkable_deps.push_back(dep);
   } else if (dep->output_type() == Target::CREATE_BUNDLE &&
              dep->bundle_data().is_framework()) {
-    framework_deps->push_back(dep);
+    classified_deps->framework_deps.push_back(dep);
   } else {
-    non_linkable_deps->push_back(dep);
+    classified_deps->non_linkable_deps.push_back(dep);
   }
 }
 
 void NinjaBinaryTargetWriter::AddSourceSetFiles(
     const Target* source_set,
     UniqueVector<OutputFile>* obj_files) const {
-  // Just add all sources to the list.
+  std::vector<OutputFile> tool_outputs;  // Prevent allocation in loop.
+
+  // Compute object files for all sources. Only link the first output from
+  // the tool if there are more than one.
   for (const auto& source : source_set->sources()) {
-    obj_files->push_back(OutputFile(settings_->build_settings(), source));
+    const char* tool_name = Tool::kToolNone;
+    if (source_set->GetOutputFilesForSource(source, &tool_name, &tool_outputs))
+      obj_files->push_back(tool_outputs[0]);
+  }
+
+  // Swift files may generate one object file per module or one per source file
+  // depending on how the compiler is invoked (whole module optimization).
+  if (source_set->source_types_used().SwiftSourceUsed()) {
+    const Tool* tool = source_set->toolchain()->GetToolForSourceTypeAsC(
+        SourceFile::SOURCE_SWIFT);
+
+    std::vector<OutputFile> outputs;
+    SubstitutionWriter::ApplyListToLinkerAsOutputFile(
+        source_set, tool, tool->outputs(), &outputs);
+
+    for (const OutputFile& output : outputs) {
+      SourceFile output_as_source =
+          output.AsSourceFile(source_set->settings()->build_settings());
+      if (output_as_source.IsObjectType()) {
+        obj_files->push_back(output);
+      }
+    }
+  }
+
+  // Add MSVC precompiled header object files. GCC .gch files are not object
+  // files so they are omitted.
+  if (source_set->config_values().has_precompiled_headers()) {
+    if (source_set->source_types_used().Get(SourceFile::SOURCE_C)) {
+      const CTool* tool = source_set->toolchain()->GetToolAsC(CTool::kCToolCc);
+      if (tool && tool->precompiled_header_type() == CTool::PCH_MSVC) {
+        GetPCHOutputFiles(source_set, CTool::kCToolCc, &tool_outputs);
+        obj_files->Append(tool_outputs.begin(), tool_outputs.end());
+      }
+    }
+    if (source_set->source_types_used().Get(SourceFile::SOURCE_CPP)) {
+      const CTool* tool = source_set->toolchain()->GetToolAsC(CTool::kCToolCxx);
+      if (tool && tool->precompiled_header_type() == CTool::PCH_MSVC) {
+        GetPCHOutputFiles(source_set, CTool::kCToolCxx, &tool_outputs);
+        obj_files->Append(tool_outputs.begin(), tool_outputs.end());
+      }
+    }
+    if (source_set->source_types_used().Get(SourceFile::SOURCE_M)) {
+      const CTool* tool =
+          source_set->toolchain()->GetToolAsC(CTool::kCToolObjC);
+      if (tool && tool->precompiled_header_type() == CTool::PCH_MSVC) {
+        GetPCHOutputFiles(source_set, CTool::kCToolObjC, &tool_outputs);
+        obj_files->Append(tool_outputs.begin(), tool_outputs.end());
+      }
+    }
+    if (source_set->source_types_used().Get(SourceFile::SOURCE_MM)) {
+      const CTool* tool =
+          source_set->toolchain()->GetToolAsC(CTool::kCToolObjCxx);
+      if (tool && tool->precompiled_header_type() == CTool::PCH_MSVC) {
+        GetPCHOutputFiles(source_set, CTool::kCToolObjCxx, &tool_outputs);
+        obj_files->Append(tool_outputs.begin(), tool_outputs.end());
+      }
+    }
   }
 }
 
 void NinjaBinaryTargetWriter::WriteCompilerBuildLine(
-    const SourceFile& source,
+    const std::vector<SourceFile>& sources,
     const std::vector<OutputFile>& extra_deps,
     const std::vector<OutputFile>& order_only_deps,
     const char* tool_name,
-    const std::vector<OutputFile>& outputs) {
+    const std::vector<OutputFile>& outputs,
+    bool can_write_source_info) {
   out_ << "build";
   path_output_.WriteFiles(out_, outputs);
 
   out_ << ": " << rule_prefix_ << tool_name;
-  out_ << " ";
-  path_output_.WriteFile(out_, source);
+  path_output_.WriteFiles(out_, sources);
 
   if (!extra_deps.empty()) {
     out_ << " |";
@@ -225,21 +293,36 @@ void NinjaBinaryTargetWriter::WriteCompilerBuildLine(
     path_output_.WriteFiles(out_, order_only_deps);
   }
   out_ << std::endl;
+
+  if (!sources.empty() && can_write_source_info) {
+    out_ << "  "
+         << "source_file_part = " << sources[0].GetName();
+    out_ << std::endl;
+    out_ << "  "
+         << "source_name_part = "
+         << FindFilenameNoExtension(&sources[0].value());
+    out_ << std::endl;
+  }
 }
 
-void NinjaBinaryTargetWriter::WriteLinkerFlags(
+void NinjaBinaryTargetWriter::WriteCustomLinkerFlags(
     std::ostream& out,
-    const Tool* tool,
-    const SourceFile* optional_def_file) {
-  if (tool->AsC()) {
-    // First the ldflags from the target and its config.
-    RecursiveTargetConfigStringsToStream(target_, &ConfigValues::ldflags,
-                                       GetFlagOptions(), out);
-  }
+    const Tool* tool) {
 
-  // Followed by library search paths that have been recursively pushed
+  if (tool->AsC() || (tool->AsRust() && tool->AsRust()->MayLink())) {
+    // First the ldflags from the target and its config.
+    RecursiveTargetConfigStringsToStream(kRecursiveWriterKeepDuplicates,
+                                         target_, &ConfigValues::ldflags,
+                                         GetFlagOptions(), out);
+  }
+}
+
+void NinjaBinaryTargetWriter::WriteLibrarySearchPath(
+    std::ostream& out,
+    const Tool* tool) {
+  // Write library search paths that have been recursively pushed
   // through the dependency tree.
-  const OrderedSet<SourceDir> all_lib_dirs = target_->all_lib_dirs();
+  const UniqueVector<SourceDir>& all_lib_dirs = target_->all_lib_dirs();
   if (!all_lib_dirs.empty()) {
     // Since we're passing these on the command line to the linker and not
     // to Ninja, we need to do shell escaping.
@@ -266,6 +349,16 @@ void NinjaBinaryTargetWriter::WriteLinkerFlags(
                                      PathOutput::DIR_NO_LAST_SLASH);
     }
   }
+}
+
+void NinjaBinaryTargetWriter::WriteLinkerFlags(
+    std::ostream& out,
+    const Tool* tool,
+    const SourceFile* optional_def_file) {
+  // First any ldflags
+  WriteCustomLinkerFlags(out, tool);
+  // Then the library search path
+  WriteLibrarySearchPath(out, tool);
 
   if (optional_def_file) {
     out_ << " /DEF:";
@@ -275,23 +368,20 @@ void NinjaBinaryTargetWriter::WriteLinkerFlags(
 
 void NinjaBinaryTargetWriter::WriteLibs(std::ostream& out, const Tool* tool) {
   // Libraries that have been recursively pushed through the dependency tree.
+  // Since we're passing these on the command line to the linker and not
+  // to Ninja, we need to do shell escaping.
+  PathOutput lib_path_output(
+      path_output_.current_dir(), settings_->build_settings()->root_path_utf8(),
+      ESCAPE_NINJA_COMMAND);
   EscapeOptions lib_escape_opts;
   lib_escape_opts.mode = ESCAPE_NINJA_COMMAND;
-  const OrderedSet<LibFile> all_libs = target_->all_libs();
+  const UniqueVector<LibFile>& all_libs = target_->all_libs();
   for (size_t i = 0; i < all_libs.size(); i++) {
     const LibFile& lib_file = all_libs[i];
     const std::string& lib_value = lib_file.value();
-    std::string_view framework_name = GetFrameworkName(lib_value);
     if (lib_file.is_source_file()) {
       out << " " << tool->linker_arg();
-      path_output_.WriteFile(out, lib_file.source_file());
-    } else if (!framework_name.empty()) {
-      // Special-case libraries ending in ".framework" to support Mac: Add the
-      // -framework switch and don't add the extension to the output.
-      // TODO(crbug.com/gn/119): remove this once all code has been ported to
-      // use "frameworks" and "framework_dirs" instead.
-      out << " " << tool->framework_switch();
-      EscapeStringToStream(out, framework_name, lib_escape_opts);
+      lib_path_output.WriteFile(out, lib_file.source_file());
     } else {
       out << " " << tool->lib_switch();
       EscapeStringToStream(out, lib_value, lib_escape_opts);
@@ -301,11 +391,32 @@ void NinjaBinaryTargetWriter::WriteLibs(std::ostream& out, const Tool* tool) {
 
 void NinjaBinaryTargetWriter::WriteFrameworks(std::ostream& out,
                                               const Tool* tool) {
-  FrameworksWriter writer(tool->framework_switch());
-
   // Frameworks that have been recursively pushed through the dependency tree.
+  FrameworksWriter writer(tool->framework_switch());
   const auto& all_frameworks = target_->all_frameworks();
   for (size_t i = 0; i < all_frameworks.size(); i++) {
     writer(all_frameworks[i], out);
+  }
+
+  FrameworksWriter weak_writer(tool->weak_framework_switch());
+  const auto& all_weak_frameworks = target_->all_weak_frameworks();
+  for (size_t i = 0; i < all_weak_frameworks.size(); i++) {
+    weak_writer(all_weak_frameworks[i], out);
+  }
+}
+
+void NinjaBinaryTargetWriter::WriteSwiftModules(
+    std::ostream& out,
+    const Tool* tool,
+    const std::vector<OutputFile>& swiftmodules) {
+  // Since we're passing these on the command line to the linker and not
+  // to Ninja, we need to do shell escaping.
+  PathOutput swiftmodule_path_output(
+      path_output_.current_dir(), settings_->build_settings()->root_path_utf8(),
+      ESCAPE_NINJA_COMMAND);
+
+  for (const OutputFile& swiftmodule : swiftmodules) {
+    out << " " << tool->swiftmodule_switch();
+    swiftmodule_path_output.WriteFile(out, swiftmodule);
   }
 }

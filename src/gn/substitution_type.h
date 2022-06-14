@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
 
 class Err;
 class ParseNode;
@@ -18,7 +17,8 @@ class ParseNode;
 struct Substitution {
   const char* name;
   const char* ninja_name;
-  DISALLOW_COPY_AND_ASSIGN(Substitution);
+  Substitution(const Substitution&) = delete;
+  Substitution& operator=(const Substitution&) = delete;
 };
 
 using SubstitutionTypes = const std::vector<const Substitution*>;
@@ -37,6 +37,7 @@ extern const Substitution SubstitutionLiteral;
 extern const Substitution SubstitutionOutput;
 extern const Substitution SubstitutionLabel;
 extern const Substitution SubstitutionLabelName;
+extern const Substitution SubstitutionLabelNoToolchain;
 extern const Substitution SubstitutionRootGenDir;
 extern const Substitution SubstitutionRootOutDir;
 extern const Substitution SubstitutionOutputDir;
@@ -64,6 +65,7 @@ extern const Substitution SubstitutionBundleExecutableDir;
 // Valid for compile_xcassets tool.
 extern const Substitution SubstitutionBundleProductType;
 extern const Substitution SubstitutionBundlePartialInfoPlist;
+extern const Substitution SubstitutionXcassetsCompilerFlags;
 
 // Used only for the args of actions.
 extern const Substitution SubstitutionRspFileName;
