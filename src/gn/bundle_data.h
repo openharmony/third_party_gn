@@ -74,6 +74,9 @@ class BundleData {
   // Performs GetBundleRootDirOutput but returns the result as a directory.
   SourceDir GetBundleRootDirOutputAsDir(const Settings* settings) const;
 
+  // Returns directory where bundle is
+  SourceDir GetBundleDir(const Settings* settings) const;
+
   // Returns the list of inputs for the compilation of the asset catalog.
   SourceFiles& assets_catalog_sources() { return assets_catalog_sources_; }
   const SourceFiles& assets_catalog_sources() const {
@@ -151,6 +154,11 @@ class BundleData {
     return bundle_deps_filter_;
   }
 
+  SubstitutionList& xcasset_compiler_flags() { return xcasset_compiler_flags_; }
+  const SubstitutionList& xcasset_compiler_flags() const {
+    return xcasset_compiler_flags_;
+  }
+
   // Recursive collection of all bundle_data that the target depends on.
   const UniqueTargets& bundle_deps() const { return bundle_deps_; }
 
@@ -196,8 +204,10 @@ class BundleData {
   std::vector<SourceFile> code_signing_sources_;
   SubstitutionList code_signing_outputs_;
   SubstitutionList code_signing_args_;
+  SubstitutionList xcasset_compiler_flags_;
 
-  DISALLOW_COPY_AND_ASSIGN(BundleData);
+  BundleData(const BundleData&) = delete;
+  BundleData& operator=(const BundleData&) = delete;
 };
 
 #endif  // TOOLS_GN_BUNDLE_DATA_H_

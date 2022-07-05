@@ -10,8 +10,8 @@
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "gn/commands.h"
@@ -35,9 +35,10 @@ namespace commands {
 
 const char kSwitchDryRun[] = "dry-run";
 const char kSwitchDumpTree[] = "dump-tree";
-const char kSwitchDumpTreeText[] = "text";
-const char kSwitchDumpTreeJSON[] = "json";
+const char kSwitchReadTree[] = "read-tree";
 const char kSwitchStdin[] = "stdin";
+const char kSwitchTreeTypeJSON[] = "json";
+const char kSwitchTreeTypeText[] = "text";
 
 const char kFormat[] = "format";
 const char kFormat_HelpShort[] = "format: Format .gn files.";
@@ -59,9 +60,8 @@ const char kFormat_Help[] =
 Arguments
 
   --dry-run
-      Does not change or output anything, but sets the process exit code based
-      on whether output would be different than what's on disk. This is useful
-      for presubmit/lint-type checks.
+      Prints the list of files that would be reformatted but does not write
+      anything to disk. This is useful for presubmit/lint-type checks.
       - Exit code 0: successful format, matches on disk.
       - Exit code 1: general failure (parse error, etc.)
       - Exit code 2: successful format, but differs from on disk.
@@ -74,11 +74,18 @@ Arguments
       Read input from stdin and write to stdout rather than update a file
       in-place.
 
+  --read-tree=json
+      Reads an AST from stdin in the format output by --dump-tree=json and
+      uses that as the parse tree. (The only read-tree format currently
+      supported is json.) The given .gn file will be overwritten. This can be
+      used to programmatically transform .gn files.
+
 Examples
   gn format //some/BUILD.gn //some/other/BUILD.gn //and/another/BUILD.gn
   gn format some\\BUILD.gn
   gn format /abspath/some/BUILD.gn
   gn format --stdin
+  gn format --read-tree=json //rewritten/BUILD.gn
 )";
 
 namespace {
@@ -156,11 +163,12 @@ class Printer {
   // Whether there's a blank separator line at the current position.
   bool HaveBlankLine();
 
-  // Sort a list on the RHS if the LHS is 'sources', 'deps' or 'public_deps'.
-  // The 'sources' are sorted alphabetically while the 'deps' and 'public_deps'
-  // are sorted putting first the relative targets and then the global ones
-  // (both sorted alphabetically).
-  void SortIfSourcesOrDeps(const BinaryOpNode* binop);
+  // Sort a list on the RHS if the LHS is one of the following:
+  // 'sources': sorted alphabetically.
+  // 'deps' or ends in 'deps': sorted such that relative targets are first,
+  //   followed by global targets, each internally sorted alphabetically.
+  // 'visibility': same as 'deps'.
+  void SortIfApplicable(const BinaryOpNode* binop);
 
   // Sort contiguous import() function calls in the given ordered list of
   // statements (the body of a block or scope).
@@ -183,10 +191,11 @@ class Printer {
   // will be set so it can be closed at the end of the expression.
   void AddParen(int prec, int outer_prec, bool* parenthesized);
 
-  // Print the expression to the output buffer. Returns the type of element
-  // added to the output. The value of outer_prec gives the precedence of the
-  // operator outside this Expr. If that operator binds tighter than root's,
-  // Expr must introduce parentheses.
+  // Print the expression given by |root| to the output buffer and appends
+  // |suffix| to that output. Returns a penalty that represents the cost of
+  // adding that output to the buffer (where higher is worse). The value of
+  // outer_prec gives the precedence of the operator outside this Expr. If that
+  // operator binds tighter than root's, Expr() must introduce parentheses.
   int Expr(const ParseNode* root, int outer_prec, const std::string& suffix);
 
   // Generic penalties for exceeding maximum width, adding more lines, etc.
@@ -250,7 +259,8 @@ class Printer {
   // Gives the precedence for operators in a BinaryOpNode.
   std::map<std::string_view, Precedence> precedence_;
 
-  DISALLOW_COPY_AND_ASSIGN(Printer);
+  Printer(const Printer&) = delete;
+  Printer& operator=(const Printer&) = delete;
 };
 
 Printer::Printer() : penalty_depth_(0) {
@@ -323,7 +333,7 @@ void Printer::PrintTrailingCommentsWrapped(const std::vector<Token>& comments) {
         if (have_empty_line && continuation) {
           Print("# ");
         }
-        Print(split_on_spaces[j]) ;
+        Print(split_on_spaces[j]);
         Print(" ");
         if (split_on_spaces[j] != "#") {
           have_empty_line = false;
@@ -382,7 +392,7 @@ bool Printer::HaveBlankLine() {
   return n > 2 && output_[n - 1] == '\n' && output_[n - 2] == '\n';
 }
 
-void Printer::SortIfSourcesOrDeps(const BinaryOpNode* binop) {
+void Printer::SortIfApplicable(const BinaryOpNode* binop) {
   if (const Comments* comments = binop->comments()) {
     const std::vector<Token>& before = comments->before();
     if (!before.empty() && (before.front().value() == "# NOSORT" ||
@@ -401,8 +411,9 @@ void Printer::SortIfSourcesOrDeps(const BinaryOpNode* binop) {
     if (base::EndsWith(lhs, "sources", base::CompareCase::SENSITIVE) ||
         lhs == "public")
       const_cast<ListNode*>(list)->SortAsStringsList();
-    else if (base::EndsWith(lhs, "deps", base::CompareCase::SENSITIVE))
-      const_cast<ListNode*>(list)->SortAsDepsList();
+    else if (base::EndsWith(lhs, "deps", base::CompareCase::SENSITIVE) ||
+             lhs == "visibility")
+      const_cast<ListNode*>(list)->SortAsTargetsList();
   }
 }
 
@@ -442,9 +453,14 @@ void Printer::SortImports(std::vector<std::unique_ptr<PARSENODE>>& statements) {
       const auto& b_args = b->AsFunctionCall()->args()->contents();
       std::string_view a_name;
       std::string_view b_name;
-      if (!a_args.empty())
+
+      // Non-literal imports are treated as empty names, and order is
+      // maintained. Arbitrarily complex expressions in import() are
+      // rare, and it probably doesn't make sense to sort non-string
+      // literals anyway, see format_test_data/083.gn.
+      if (!a_args.empty() && a_args[0]->AsLiteral())
         a_name = a_args[0]->AsLiteral()->value().value();
-      if (!b_args.empty())
+      if (!b_args.empty() && b_args[0]->AsLiteral())
         b_name = b_args[0]->AsLiteral()->value().value();
 
       auto is_absolute = [](std::string_view import) {
@@ -512,7 +528,7 @@ int SuffixCommentTreeWalk(const ParseNode* node) {
     RETURN_IF_SET(SuffixCommentTreeWalk(binop->right()));
   } else if (const BlockNode* block = node->AsBlock()) {
     RETURN_IF_SET(SuffixCommentTreeWalk(block->End()));
-  } else if (const ConditionNode* condition = node->AsConditionNode()) {
+  } else if (const ConditionNode* condition = node->AsCondition()) {
     RETURN_IF_SET(SuffixCommentTreeWalk(condition->if_false()));
     RETURN_IF_SET(SuffixCommentTreeWalk(condition->if_true()));
     RETURN_IF_SET(SuffixCommentTreeWalk(condition->condition()));
@@ -719,7 +735,7 @@ int Printer::Expr(const ParseNode* root,
   } else if (const BinaryOpNode* binop = root->AsBinaryOp()) {
     CHECK(precedence_.find(binop->op().value()) != precedence_.end());
 
-    SortIfSourcesOrDeps(binop);
+    SortIfApplicable(binop);
 
     Precedence prec = precedence_[binop->op().value()];
 
@@ -739,6 +755,9 @@ int Printer::Expr(const ParseNode* root,
     } else {
       AddParen(prec_left, outer_prec, &parenthesized);
     }
+
+    if (parenthesized)
+      at_end = ")" + at_end;
 
     int start_line = CurrentLine();
     int start_column = CurrentColumn();
@@ -785,9 +804,7 @@ int Printer::Expr(const ParseNode* root,
     Printer sub1;
     InitializeSub(&sub1);
     sub1.Print(" ");
-    int penalty_current_line =
-        sub1.Expr(binop->right(), prec_right, std::string());
-    sub1.Print(suffix);
+    int penalty_current_line = sub1.Expr(binop->right(), prec_right, at_end);
     sub1.PrintSuffixComments(root);
     sub1.FlushComments();
     penalty_current_line += AssessPenalty(sub1.String());
@@ -802,9 +819,7 @@ int Printer::Expr(const ParseNode* root,
     Printer sub2;
     InitializeSub(&sub2);
     sub2.Newline();
-    int penalty_next_line =
-        sub2.Expr(binop->right(), prec_right, std::string());
-    sub2.Print(suffix);
+    int penalty_next_line = sub2.Expr(binop->right(), prec_right, at_end);
     sub2.PrintSuffixComments(root);
     sub2.FlushComments();
     penalty_next_line += AssessPenalty(sub2.String());
@@ -841,7 +856,8 @@ int Printer::Expr(const ParseNode* root,
 
     if (penalty_current_line < penalty_next_line || exceeds_maximum_all_ways) {
       Print(" ");
-      Expr(binop->right(), prec_right, std::string());
+      Expr(binop->right(), prec_right, at_end);
+      at_end = "";
     } else if (tried_rhs_multiline &&
                penalty_multiline_rhs_list < penalty_next_line) {
       // Force a multiline list on the right.
@@ -854,15 +870,17 @@ int Printer::Expr(const ParseNode* root,
       Newline();
       penalty += std::abs(CurrentColumn() - start_column) *
                  kPenaltyHorizontalSeparation;
-      Expr(binop->right(), prec_right, std::string());
+      Expr(binop->right(), prec_right, at_end);
+      at_end = "";
     }
     stack_.pop_back();
     penalty += (CurrentLine() - start_line) * GetPenaltyForLineBreak();
   } else if (const BlockNode* block = root->AsBlock()) {
     Sequence(kSequenceStyleBracedBlock, block->statements(), block->End(),
              false);
-  } else if (const ConditionNode* condition = root->AsConditionNode()) {
+  } else if (const ConditionNode* condition = root->AsCondition()) {
     Print("if (");
+    CHECK(at_end.empty());
     Expr(condition->condition(), kPrecedenceLowest, ") {");
     Sequence(kSequenceStyleBracedBlockAlreadyOpen,
              condition->if_true()->statements(), condition->if_true()->End(),
@@ -900,9 +918,6 @@ int Printer::Expr(const ParseNode* root,
   } else {
     CHECK(false) << "Unhandled case in Expr.";
   }
-
-  if (parenthesized)
-    Print(")");
 
   // Defer any end of line comment until we reach the newline.
   if (root->comments() && !root->comments()->suffix().empty()) {
@@ -1200,21 +1215,17 @@ bool Printer::ListWillBeMultiline(
 
 void DoFormat(const ParseNode* root,
               TreeDumpMode dump_tree,
-              std::string* output) {
-#if defined(OS_WIN)
-    // Set stderr to binary mode to prevent converting newlines to \r\n.
-    _setmode(_fileno(stderr), _O_BINARY);
-#endif
-
+              std::string* output,
+              std::string* dump_output) {
   if (dump_tree == TreeDumpMode::kPlainText) {
     std::ostringstream os;
     RenderToText(root->GetJSONNode(), 0, os);
-    fprintf(stderr, "%s", os.str().c_str());
+    *dump_output = os.str();
   } else if (dump_tree == TreeDumpMode::kJSON) {
     std::string os;
     base::JSONWriter::WriteWithOptions(
         root->GetJSONNode(), base::JSONWriter::OPTIONS_PRETTY_PRINT, &os);
-    fprintf(stderr, "%s", os.c_str());
+    *dump_output = os;
   }
 
   Printer pr;
@@ -1224,9 +1235,18 @@ void DoFormat(const ParseNode* root,
 
 }  // namespace
 
+bool FormatJsonToString(const std::string& json, std::string* output) {
+  base::JSONReader reader;
+  std::unique_ptr<base::Value> json_root = reader.Read(json);
+  std::unique_ptr<ParseNode> root = ParseNode::BuildFromJSON(*json_root);
+  DoFormat(root.get(), TreeDumpMode::kInactive, output, nullptr);
+  return true;
+}
+
 bool FormatStringToString(const std::string& input,
                           TreeDumpMode dump_tree,
-                          std::string* output) {
+                          std::string* output,
+                          std::string* dump_output) {
   SourceFile source_file;
   InputFile file(source_file);
   file.SetContents(input);
@@ -1246,11 +1266,17 @@ bool FormatStringToString(const std::string& input,
     return false;
   }
 
-  DoFormat(parse_node.get(), dump_tree, output);
+  DoFormat(parse_node.get(), dump_tree, output, dump_output);
   return true;
 }
 
 int RunFormat(const std::vector<std::string>& args) {
+#if defined(OS_WIN)
+  // Set to binary mode to prevent converting newlines to \r\n.
+  _setmode(_fileno(stdout), _O_BINARY);
+  _setmode(_fileno(stderr), _O_BINARY);
+#endif
+
   bool dry_run =
       base::CommandLine::ForCurrentProcess()->HasSwitch(kSwitchDryRun);
   TreeDumpMode dump_tree = TreeDumpMode::kInactive;
@@ -1258,16 +1284,16 @@ int RunFormat(const std::vector<std::string>& args) {
     std::string tree_type =
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             kSwitchDumpTree);
-    if (tree_type == kSwitchDumpTreeJSON) {
+    if (tree_type == kSwitchTreeTypeJSON) {
       dump_tree = TreeDumpMode::kJSON;
-    } else if (tree_type.empty() || tree_type == kSwitchDumpTreeText) {
+    } else if (tree_type.empty() || tree_type == kSwitchTreeTypeText) {
       dump_tree = TreeDumpMode::kPlainText;
     } else {
       Err(Location(), tree_type +
                           " is an invalid value for --dump-tree. Specify "
                           "\"" +
-                          kSwitchDumpTreeText + "\" or \"" +
-                          kSwitchDumpTreeJSON + "\".\n")
+                          kSwitchTreeTypeText + "\" or \"" +
+                          kSwitchTreeTypeJSON + "\".\n")
           .PrintToStdout();
       return 1;
     }
@@ -1291,12 +1317,10 @@ int RunFormat(const std::vector<std::string>& args) {
     }
     std::string input = ReadStdin();
     std::string output;
-    if (!FormatStringToString(input, dump_tree, &output))
+    std::string dump_output;
+    if (!FormatStringToString(input, dump_tree, &output, &dump_output))
       return 1;
-#if defined(OS_WIN)
-    // Set stdout to binary mode to prevent converting newlines to \r\n.
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
+    printf("%s", dump_output.c_str());
     printf("%s", output.c_str());
     return 0;
   }
@@ -1311,14 +1335,55 @@ int RunFormat(const std::vector<std::string>& args) {
   SourceDir source_dir =
       SourceDirForCurrentDirectory(setup.build_settings().root_path());
 
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(kSwitchReadTree)) {
+    std::string tree_type =
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            kSwitchReadTree);
+    if (tree_type != kSwitchTreeTypeJSON) {
+      Err(Location(), "Only json supported for read-tree.\n").PrintToStdout();
+      return 1;
+    }
+
+    if (args.size() != 1) {
+      Err(Location(),
+          "Expect exactly one .gn when reading tree from json on stdin.\n")
+          .PrintToStdout();
+      return 1;
+    }
+    Err err;
+    SourceFile file =
+        source_dir.ResolveRelativeFile(Value(nullptr, args[0]), &err);
+    if (err.has_error()) {
+      err.PrintToStdout();
+      return 1;
+    }
+    base::FilePath to_format = setup.build_settings().GetFullPath(file);
+    std::string output;
+    FormatJsonToString(ReadStdin(), &output);
+    if (base::WriteFile(to_format, output.data(),
+                        static_cast<int>(output.size())) == -1) {
+      Err(Location(), std::string("Failed to write output to \"") +
+                          FilePathToUTF8(to_format) + std::string("\"."))
+          .PrintToStdout();
+      return 1;
+    }
+    if (!quiet) {
+      printf("Wrote rebuilt from json to '%s'.\n",
+             FilePathToUTF8(to_format).c_str());
+    }
+    return 0;
+  }
+
   // TODO(scottmg): Eventually, this list of files should be processed in
   // parallel.
+  int exit_code = 0;
   for (const auto& arg : args) {
     Err err;
     SourceFile file = source_dir.ResolveRelativeFile(Value(nullptr, arg), &err);
     if (err.has_error()) {
       err.PrintToStdout();
-      return 1;
+      exit_code = 1;
+      continue;
     }
 
     base::FilePath to_format = setup.build_settings().GetFullPath(file);
@@ -1327,17 +1392,27 @@ int RunFormat(const std::vector<std::string>& args) {
       Err(Location(),
           std::string("Couldn't read \"") + FilePathToUTF8(to_format))
           .PrintToStdout();
-      return 1;
+      exit_code = 1;
+      continue;
     }
 
     std::string output_string;
-    if (!FormatStringToString(original_contents, dump_tree, &output_string)) {
-      return 1;
+    std::string dump_output_string;
+    if (!FormatStringToString(original_contents, dump_tree, &output_string,
+                              &dump_output_string)) {
+      exit_code = 1;
+      continue;
     }
+    printf("%s", dump_output_string.c_str());
     if (dump_tree == TreeDumpMode::kInactive) {
+      if (dry_run) {
+        if (original_contents != output_string) {
+          printf("%s\n", arg.c_str());
+          exit_code = 2;
+        }
+        continue;
+      }
       // Update the file in-place.
-      if (dry_run)
-        return original_contents == output_string ? 0 : 2;
       if (original_contents != output_string) {
         if (base::WriteFile(to_format, output_string.data(),
                             static_cast<int>(output_string.size())) == -1) {
@@ -1345,7 +1420,8 @@ int RunFormat(const std::vector<std::string>& args) {
               std::string("Failed to write formatted output back to \"") +
                   FilePathToUTF8(to_format) + std::string("\"."))
               .PrintToStdout();
-          return 1;
+          exit_code = 1;
+          continue;
         }
         if (!quiet) {
           printf("Wrote formatted to '%s'.\n",
@@ -1355,7 +1431,7 @@ int RunFormat(const std::vector<std::string>& args) {
     }
   }
 
-  return 0;
+  return exit_code;
 }
 
 }  // namespace commands

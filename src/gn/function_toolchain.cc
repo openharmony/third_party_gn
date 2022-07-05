@@ -196,6 +196,9 @@ Value RunToolchain(Scope* scope,
       !EnsureNotProcessingBuildConfig(function, scope, err))
     return Value();
 
+  if (!EnsureSingleStringArg(function, args, err))
+    return Value();
+
   // Note that we don't want to use MakeLabelForScope since that will include
   // the toolchain name in the label, and toolchain labels don't themselves
   // have toolchain names.
@@ -281,10 +284,12 @@ Tool types
     Compiler tools:
       "cc": C compiler
       "cxx": C++ compiler
+      "cxx_module": C++ compiler used for Clang .modulemap files
       "objc": Objective C compiler
       "objcxx": Objective C++ compiler
       "rc": Resource compiler (Windows .rc files)
       "asm": Assembler
+      "swift": Swift compiler driver
 
     Linker tools:
       "alink": Linker for static libraries (archives)
@@ -408,6 +413,7 @@ Tool variables
           "-lfreetype -lexpat".
 
     framework_switch [string, optional, link tools only]
+    weak_framework_switch [string, optional, link tools only]
     framework_dir_switch [string, optional, link tools only]
         Valid for: Linker tools
 
@@ -417,11 +423,27 @@ Tool variables
 
         If you specified:
           framework_switch = "-framework "
+          weak_framework_switch = "-weak_framework "
           framework_dir_switch = "-F"
-        then the "{{libs}}" expansion for
-          [ "UIKit.framework", "$root_out_dir/Foo.framework" ]
+        and:
+          framework_dirs = [ "$root_out_dir" ]
+          frameworks = [ "UIKit.framework", "Foo.framework" ]
+          weak_frameworks = [ "MediaPlayer.framework" ]
+        would be:
+          "-F. -framework UIKit -framework Foo -weak_framework MediaPlayer"
+
+    swiftmodule_switch [string, optional, link tools only]
+        Valid for: Linker tools except "alink"
+
+        The string will be prependend to the path to the .swiftmodule files
+        that are embedded in the linker output.
+
+        If you specified:
+          swiftmodule_swift = "-Wl,-add_ast_path,"
+        then the "{{swiftmodules}}" expansion for
+          [ "obj/foo/Foo.swiftmodule" ]
         would be
-          "-framework UIKit -F. -framework Foo"
+          "-Wl,-add_ast_path,obj/foo/Foo.swiftmodule"
 
     outputs  [list of strings with substitutions]
         Valid for: Linker and compiler tools (required)
@@ -448,10 +470,20 @@ Tool variables
         {{target_output_name}}, {{output_extension}} and {{output_dir}} allows
         the target to override these values.
           outputs = [
-            "{{output_dir}}/{{target_output_name}}"
-                "{{output_extension}}",
+            "{{output_dir}}/{{target_output_name}}{{output_extension}}",
             "{{output_dir}}/{{target_output_name}}.lib",
           ]
+
+    partial_outputs  [list of strings with substitutions]
+        Valid for: "swift" only
+
+        An array of names for the partial outputs the tool produces. These
+        are relative to the build output directory. The expansion will be
+        evaluated for each file listed in the "sources" of the target.
+
+        This is used to deal with whole module optimization, allowing to
+        list one object file per source file when whole module optimization
+        is disabled.
 
     pool [label, optional]
         Valid for: all tools (optional)
@@ -542,7 +574,7 @@ Tool variables
           tool("link") {
             command = "link -o {{output}} {{ldflags}} @{{output}}.rsp"
             rspfile = "{{output}}.rsp"
-            rspfile_content = "{{inputs}} {{solibs}} {{libs}}"
+            rspfile_content = "{{inputs}} {{solibs}} {{libs}} {{rlibs}}"
           }
 
     runtime_outputs  [string list with substitutions]
@@ -551,6 +583,14 @@ Tool variables
         If specified, this list is the subset of the outputs that should be
         added to runtime deps (see "gn help runtime_deps"). By default (if
         runtime_outputs is empty or unspecified), it will be the link_output.
+
+    rust_sysroot
+        Valid for: Rust tools
+
+        A path relative to root_out_dir. This is not used in the build
+        process, but may be used when generating metadata for rust-analyzer.
+        (See --export-rust-project). It enables such metadata to include
+        information about the Rust standard library.
 
 )"  // String break to prevent overflowing the 16K max VC string length.
     R"(Expansions for tool variables
@@ -569,6 +609,11 @@ Tool variables
         colon. For "//foo/bar:baz" this will be "baz". Unlike
         {{target_output_name}}, this is not affected by the "output_prefix" in
         the tool or the "output_name" set on the target.
+
+    {{label_no_toolchain}}
+        The label of the current target, never including the toolchain
+        (otherwise, this is identical to {{label}}). This is used as the module
+        name when using .modulemap files.
 
     {{output}}
         The relative path and name of the output(s) of the current build step.
@@ -608,6 +653,13 @@ Tool variables
         Defines will be prefixed by "-D" and include directories will be
         prefixed by "-I" (these work with Posix tools as well as Microsoft
         ones).
+
+    {{module_deps}}
+    {{module_deps_no_self}}
+        Strings that correspond to the flags necessary to depend upon the Clang
+        modules referenced by the current target. The "_no_self" version doesn't
+        include the module for the current target, and can be used to compile
+        the pcm itself.
 
     {{source}}
         The relative path and name of the current input file.
@@ -654,10 +706,6 @@ Tool variables
         Expands to the list of system libraries to link to. Each will be
         prefixed by the "lib_switch".
 
-        As a special case to support Mac, libraries with names ending in
-        ".framework" will be added to the {{libs}} with "-framework" preceding
-        it, and the lib prefix will be ignored.
-
         Example: "-lfoo -lbar"
 
     {{output_dir}}
@@ -691,11 +739,26 @@ Tool variables
 
         Example: "libfoo.so libbar.so"
 
+    {{rlibs}}
+        Any Rust .rlibs which need to be linked into a final C++ target.
+        These should be treated as {{inputs}} except that sometimes
+        they might have different linker directives applied.
+
+        Example: "obj/foo/libfoo.rlib"
+
     {{frameworks}}
         Shared libraries packaged as framework bundle. This is principally
         used on Apple's platforms (macOS and iOS). All name must be ending
         with ".framework" suffix; the suffix will be stripped when expanding
-        {{frameworks}} and each item will be preceded by "-framework".
+        {{frameworks}} and each item will be preceded by "-framework" or
+        "-weak_framework".
+
+    {{swiftmodules}}
+        Swift .swiftmodule files that needs to be embedded into the binary.
+        This is necessary to correctly link with object generated by the
+        Swift compiler (the .swiftmodule file cannot be embedded in object
+        files directly). Those will be prefixed with "swiftmodule_switch"
+        value.
 
 )"  // String break to prevent overflowing the 16K max VC string length.
     R"(  The static library ("alink") tool allows {{arflags}} plus the common tool
@@ -730,6 +793,25 @@ Tool variables
         Expands to the path to the partial Info.plist generated by the
         assets catalog compiler. Usually based on the target_name of
         the create_bundle target.
+
+    {{xcasset_compiler_flags}}
+        Expands to the list of flags specified in corresponding
+        create_bundle target.
+
+  The Swift tool has multiple input and outputs. It must have exactly one
+  output of .swiftmodule type, but can have one or more object file outputs,
+  in addition to other type of outputs. The following expansions are available:
+
+    {{module_name}}
+        Expands to the string representing the module name of target under
+        compilation (see "module_name" variable).
+
+    {{module_dirs}}
+        Expands to the list of -I<path> for the target Swift module search
+        path computed from target dependencies.
+
+    {{swiftflags}}
+        Expands to the list of strings representing Swift compiler flags.
 
   Rust tools have the notion of a single input and a single output, along
   with a set of compiler-specific flags. The following expansions are
@@ -779,14 +861,12 @@ Separate linking and dependencies for shared libraries
       command = "..."
       outputs = [
         "{{output_dir}}/{{target_output_name}}{{output_extension}}",
-        "{{output_dir}}/{{target_output_name}}"
-            "{{output_extension}}.TOC",
+        "{{output_dir}}/{{target_output_name}}{{output_extension}}.TOC",
       ]
       link_output =
         "{{output_dir}}/{{target_output_name}}{{output_extension}}"
       depend_output =
-        "{{output_dir}}/{{target_output_name}}"
-            "{{output_extension}}.TOC"
+        "{{output_dir}}/{{target_output_name}}{{output_extension}}.TOC"
       restat = true
     }
 

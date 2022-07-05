@@ -4,17 +4,22 @@
 
 #include "gn/commands.h"
 
+#include <optional>
+
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "gn/builder.h"
+#include "gn/config_values_extractors.h"
 #include "gn/filesystem_utils.h"
 #include "gn/item.h"
 #include "gn/label.h"
 #include "gn/label_pattern.h"
 #include "gn/setup.h"
 #include "gn/standard_out.h"
+#include "gn/switches.h"
 #include "gn/target.h"
 #include "util/build_config.h"
 
@@ -27,11 +32,12 @@ namespace {
 // returns false. If the pattern is valid, fills the vector (which might be
 // empty if there are no matches) and returns true.
 //
-// If all_toolchains is false, a pattern with an unspecified toolchain will
-// match the default toolchain only. If true, all toolchains will be matched.
+// If default_toolchain_only is true, a pattern with an unspecified toolchain
+// will match the default toolchain only. If true, all toolchains will be
+// matched.
 bool ResolveTargetsFromCommandLinePattern(Setup* setup,
                                           const std::string& label_pattern,
-                                          bool all_toolchains,
+                                          bool default_toolchain_only,
                                           std::vector<const Target*>* matches) {
   Value pattern_value(nullptr, label_pattern);
 
@@ -44,7 +50,7 @@ bool ResolveTargetsFromCommandLinePattern(Setup* setup,
     return false;
   }
 
-  if (!all_toolchains) {
+  if (default_toolchain_only) {
     // By default a pattern with an empty toolchain will match all toolchains.
     // If the caller wants to default to the main toolchain only, set it
     // explicitly.
@@ -66,7 +72,7 @@ bool ResolveStringFromCommandLineInput(
     Setup* setup,
     const SourceDir& current_dir,
     const std::string& input,
-    bool all_toolchains,
+    bool default_toolchain_only,
     UniqueVector<const Target*>* target_matches,
     UniqueVector<const Config*>* config_matches,
     UniqueVector<const Toolchain*>* toolchain_matches,
@@ -76,8 +82,8 @@ bool ResolveStringFromCommandLineInput(
     // future to allow the user to specify which types of things they want to
     // match, but it should probably only match targets by default.
     std::vector<const Target*> target_match_vector;
-    if (!ResolveTargetsFromCommandLinePattern(setup, input, all_toolchains,
-                                              &target_match_vector))
+    if (!ResolveTargetsFromCommandLinePattern(
+            setup, input, default_toolchain_only, &target_match_vector))
       return false;
     for (const Target* target : target_match_vector)
       target_matches->push_back(target);
@@ -122,45 +128,12 @@ bool ResolveStringFromCommandLineInput(
   return true;
 }
 
-enum TargetPrintingMode {
-  TARGET_PRINT_BUILDFILE,
-  TARGET_PRINT_LABEL,
-  TARGET_PRINT_OUTPUT,
-};
-
 // Retrieves the target printing mode based on the command line flags for the
 // current process. Returns true on success. On error, prints a message to the
 // console and returns false.
-bool GetTargetPrintingMode(TargetPrintingMode* mode) {
-  std::string switch_key = "as";
-  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
-
-  if (!cmdline->HasSwitch(switch_key)) {
-    // Default to labels.
-    *mode = TARGET_PRINT_LABEL;
-    return true;
-  }
-
-  std::string value = cmdline->GetSwitchValueASCII(switch_key);
-  if (value == "buildfile") {
-    *mode = TARGET_PRINT_BUILDFILE;
-    return true;
-  }
-  if (value == "label") {
-    *mode = TARGET_PRINT_LABEL;
-    return true;
-  }
-  if (value == "output") {
-    *mode = TARGET_PRINT_OUTPUT;
-    return true;
-  }
-
-  Err(Location(), "Invalid value for \"--as\".",
-      "I was expecting \"buildfile\", \"label\", or \"output\" but you\n"
-      "said \"" +
-          value + "\".")
-      .PrintToStdout();
-  return false;
+bool GetTargetPrintingMode(CommandSwitches::TargetPrintMode* mode) {
+  *mode = CommandSwitches::Get().target_print_mode();
+  return true;
 }
 
 // Returns the target type filter based on the command line flags for the
@@ -171,72 +144,20 @@ bool GetTargetPrintingMode(TargetPrintingMode* mode) {
 // will never be returned. Code applying the filters should apply Target::ACTION
 // to both ACTION and ACTION_FOREACH.
 bool GetTargetTypeFilter(Target::OutputType* type) {
-  std::string switch_key = "type";
-  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
-
-  if (!cmdline->HasSwitch(switch_key)) {
-    // Default to unknown -> no filtering.
-    *type = Target::UNKNOWN;
-    return true;
-  }
-
-  std::string value = cmdline->GetSwitchValueASCII(switch_key);
-  if (value == "group") {
-    *type = Target::GROUP;
-    return true;
-  }
-  if (value == "executable") {
-    *type = Target::EXECUTABLE;
-    return true;
-  }
-  if (value == "shared_library") {
-    *type = Target::SHARED_LIBRARY;
-    return true;
-  }
-  if (value == "loadable_module") {
-    *type = Target::LOADABLE_MODULE;
-    return true;
-  }
-  if (value == "static_library") {
-    *type = Target::STATIC_LIBRARY;
-    return true;
-  }
-  if (value == "source_set") {
-    *type = Target::SOURCE_SET;
-    return true;
-  }
-  if (value == "copy") {
-    *type = Target::COPY_FILES;
-    return true;
-  }
-  if (value == "action") {
-    *type = Target::ACTION;
-    return true;
-  }
-
-  Err(Location(), "Invalid value for \"--type\".").PrintToStdout();
-  return false;
+  *type = CommandSwitches::Get().target_type();
+  return true;
 }
 
 // Applies any testonly filtering specified on the command line to the given
 // target set. On failure, prints an error and returns false.
 bool ApplyTestonlyFilter(std::vector<const Target*>* targets) {
-  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
-  std::string testonly_key = "testonly";
+  CommandSwitches::TestonlyMode testonly_mode =
+      CommandSwitches::Get().testonly_mode();
 
-  if (targets->empty() || !cmdline->HasSwitch(testonly_key))
+  if (targets->empty() || testonly_mode == CommandSwitches::TESTONLY_NONE)
     return true;
 
-  std::string testonly_value = cmdline->GetSwitchValueASCII(testonly_key);
-  bool testonly = false;
-  if (testonly_value == "true") {
-    testonly = true;
-  } else if (testonly_value != "false") {
-    Err(Location(), "Bad value for --testonly.",
-        "I was expecting --testonly=true or --testonly=false.")
-        .PrintToStdout();
-    return false;
-  }
+  bool testonly = (testonly_mode == CommandSwitches::TESTONLY_TRUE);
 
   // Filter into a copy of the vector, then replace the output.
   std::vector<const Target*> result;
@@ -362,6 +283,48 @@ inline std::string FixGitBashLabelEdit(const std::string& label) {
 }
 #endif
 
+std::optional<HowTargetContainsFile> TargetContainsFile(
+    const Target* target,
+    const SourceFile& file) {
+  for (const auto& cur_file : target->sources()) {
+    if (cur_file == file)
+      return HowTargetContainsFile::kSources;
+  }
+  for (const auto& cur_file : target->public_headers()) {
+    if (cur_file == file)
+      return HowTargetContainsFile::kPublic;
+  }
+  for (ConfigValuesIterator iter(target); !iter.done(); iter.Next()) {
+    for (const auto& cur_file : iter.cur().inputs()) {
+      if (cur_file == file)
+        return HowTargetContainsFile::kInputs;
+    }
+  }
+  for (const auto& cur_file : target->data()) {
+    if (cur_file == file.value())
+      return HowTargetContainsFile::kData;
+    if (cur_file.back() == '/' &&
+        base::StartsWith(file.value(), cur_file, base::CompareCase::SENSITIVE))
+      return HowTargetContainsFile::kData;
+  }
+
+  if (target->action_values().script().value() == file.value())
+    return HowTargetContainsFile::kScript;
+
+  std::vector<SourceFile> output_sources;
+  target->action_values().GetOutputsAsSourceFiles(target, &output_sources);
+  for (const auto& cur_file : output_sources) {
+    if (cur_file == file)
+      return HowTargetContainsFile::kOutput;
+  }
+
+  for (const auto& cur_file : target->computed_outputs()) {
+    if (cur_file.AsSourceFile(target->settings()->build_settings()) == file)
+      return HowTargetContainsFile::kOutput;
+  }
+  return std::nullopt;
+}
+
 }  // namespace
 
 CommandInfo::CommandInfo()
@@ -388,12 +351,127 @@ const CommandInfoMap& GetCommands() {
     INSERT_COMMAND(Help)
     INSERT_COMMAND(Meta)
     INSERT_COMMAND(Ls)
+    INSERT_COMMAND(Outputs)
     INSERT_COMMAND(Path)
     INSERT_COMMAND(Refs)
+    INSERT_COMMAND(CleanStale)
 
 #undef INSERT_COMMAND
   }
   return info_map;
+}
+
+// static
+CommandSwitches CommandSwitches::s_global_switches_ = {};
+
+// static
+bool CommandSwitches::Init(const base::CommandLine& cmdline) {
+  CHECK(!s_global_switches_.is_initialized())
+      << "Only call this once from main()";
+  return s_global_switches_.InitFrom(cmdline);
+}
+
+// static
+const CommandSwitches& CommandSwitches::Get() {
+  CHECK(s_global_switches_.is_initialized())
+      << "Missing previous succesful call to CommandSwitches::Init()";
+  return s_global_switches_;
+}
+
+// static
+CommandSwitches CommandSwitches::Set(CommandSwitches new_switches) {
+  CHECK(s_global_switches_.is_initialized())
+      << "Missing previous succesful call to CommandSwitches::Init()";
+  CommandSwitches result = std::move(s_global_switches_);
+  s_global_switches_ = std::move(new_switches);
+  return result;
+}
+
+bool CommandSwitches::InitFrom(const base::CommandLine& cmdline) {
+  CommandSwitches result;
+  result.initialized_ = true;
+  result.has_quiet_ = cmdline.HasSwitch("a");
+  result.has_force_ = cmdline.HasSwitch("force");
+  result.has_all_ = cmdline.HasSwitch("all");
+  result.has_blame_ = cmdline.HasSwitch("blame");
+  result.has_tree_ = cmdline.HasSwitch("tree");
+  result.has_format_json_ = cmdline.GetSwitchValueASCII("format") == "json";
+  result.has_default_toolchain_ =
+      cmdline.HasSwitch(switches::kDefaultToolchain);
+
+  result.has_check_generated_ = cmdline.HasSwitch("check-generated");
+  result.has_check_system_ = cmdline.HasSwitch("check-system");
+  result.has_public_ = cmdline.HasSwitch("public");
+  result.has_with_data_ = cmdline.HasSwitch("with-data");
+
+  std::string_view target_print_switch = "as";
+  if (cmdline.HasSwitch(target_print_switch)) {
+    std::string value = cmdline.GetSwitchValueASCII(target_print_switch);
+    if (value == "buildfile") {
+      result.target_print_mode_ = TARGET_PRINT_BUILDFILE;
+    } else if (value == "label") {
+      result.target_print_mode_ = TARGET_PRINT_LABEL;
+    } else if (value == "output") {
+      result.target_print_mode_ = TARGET_PRINT_OUTPUT;
+    } else {
+      Err(Location(), "Invalid value for \"--as\".",
+          "I was expecting \"buildfile\", \"label\", or \"output\" but you\n"
+          "said \"" +
+              value + "\".")
+          .PrintToStdout();
+      return false;
+    }
+  }
+
+  std::string_view target_type_switch = "type";
+  if (cmdline.HasSwitch(target_type_switch)) {
+    std::string value = cmdline.GetSwitchValueASCII(target_type_switch);
+    static const struct {
+      const char* name;
+      Target::OutputType type;
+    } kTypes[] = {
+        {"group", Target::GROUP},
+        {"executable", Target::EXECUTABLE},
+        {"shared_library", Target::SHARED_LIBRARY},
+        {"loadable_module", Target::LOADABLE_MODULE},
+        {"static_library", Target::STATIC_LIBRARY},
+        {"source_set", Target::SOURCE_SET},
+        {"copy", Target::COPY_FILES},
+        {"action", Target::ACTION},
+    };
+    bool found = false;
+    for (const auto& type : kTypes) {
+      if (value == type.name) {
+        result.target_type_ = type.type;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      Err(Location(), "Invalid value for \"--type\".").PrintToStdout();
+      return false;
+    }
+  }
+  std::string_view testonly_switch = "testonly";
+  if (cmdline.HasSwitch(testonly_switch)) {
+    std::string value = cmdline.GetSwitchValueASCII(testonly_switch);
+    if (value == "true") {
+      testonly_mode_ = TESTONLY_TRUE;
+    } else if (value == "false") {
+      testonly_mode_ = TESTONLY_FALSE;
+    } else {
+      Err(Location(), "Bad value for --testonly.",
+          "I was expecting --testonly=true or --testonly=false.")
+          .PrintToStdout();
+      return false;
+    }
+  }
+
+  result.meta_rebase_dir_ = cmdline.GetSwitchValueASCII("rebase");
+  result.meta_data_keys_ = cmdline.GetSwitchValueASCII("data");
+  result.meta_walk_keys_ = cmdline.GetSwitchValueASCII("walk");
+  *this = result;
+  return true;
 }
 
 const Target* ResolveTargetFromCommandLineString(
@@ -438,7 +516,7 @@ const Target* ResolveTargetFromCommandLineString(
 bool ResolveFromCommandLineInput(
     Setup* setup,
     const std::vector<std::string>& input,
-    bool all_toolchains,
+    bool default_toolchain_only,
     UniqueVector<const Target*>* target_matches,
     UniqueVector<const Config*>* config_matches,
     UniqueVector<const Toolchain*>* toolchain_matches,
@@ -452,9 +530,9 @@ bool ResolveFromCommandLineInput(
   SourceDir cur_dir =
       SourceDirForCurrentDirectory(setup->build_settings().root_path());
   for (const auto& cur : input) {
-    if (!ResolveStringFromCommandLineInput(setup, cur_dir, cur, all_toolchains,
-                                           target_matches, config_matches,
-                                           toolchain_matches, file_matches))
+    if (!ResolveStringFromCommandLineInput(
+            setup, cur_dir, cur, default_toolchain_only, target_matches,
+            config_matches, toolchain_matches, file_matches))
       return false;
   }
   return true;
@@ -482,6 +560,23 @@ void FilterTargetsByPatterns(const std::vector<const Target*>& input,
         output->push_back(target);
         break;
       }
+    }
+  }
+}
+
+void FilterOutTargetsByPatterns(const std::vector<const Target*>& input,
+                                const std::vector<LabelPattern>& filter,
+                                std::vector<const Target*>* output) {
+  for (auto* target : input) {
+    bool match = false;
+    for (const auto& pattern : filter) {
+      if (pattern.Matches(target->label())) {
+        match = true;
+        break;
+      }
+    }
+    if (!match) {
+      output->push_back(target);
     }
   }
 }
@@ -517,17 +612,18 @@ void FilterAndPrintTargets(std::vector<const Target*>* targets,
   if (!ApplyTypeFilter(targets))
     return;
 
-  TargetPrintingMode printing_mode = TARGET_PRINT_LABEL;
+  CommandSwitches::TargetPrintMode printing_mode =
+      CommandSwitches::TARGET_PRINT_LABEL;
   if (targets->empty() || !GetTargetPrintingMode(&printing_mode))
     return;
   switch (printing_mode) {
-    case TARGET_PRINT_BUILDFILE:
+    case CommandSwitches::TARGET_PRINT_BUILDFILE:
       PrintTargetsAsBuildfiles(*targets, out);
       break;
-    case TARGET_PRINT_LABEL:
+    case CommandSwitches::TARGET_PRINT_LABEL:
       PrintTargetsAsLabels(*targets, out);
       break;
-    case TARGET_PRINT_OUTPUT:
+    case CommandSwitches::TARGET_PRINT_OUTPUT:
       PrintTargetsAsOutputs(*targets, out);
       break;
   }
@@ -546,16 +642,31 @@ void FilterAndPrintTargets(bool indent, std::vector<const Target*>* targets) {
   }
 }
 
-void FilterAndPrintTargetSet(bool indent,
-                             const std::set<const Target*>& targets) {
+void FilterAndPrintTargetSet(bool indent, const TargetSet& targets) {
   std::vector<const Target*> target_vector(targets.begin(), targets.end());
   FilterAndPrintTargets(indent, &target_vector);
 }
 
-void FilterAndPrintTargetSet(const std::set<const Target*>& targets,
-                             base::ListValue* out) {
+void FilterAndPrintTargetSet(const TargetSet& targets, base::ListValue* out) {
   std::vector<const Target*> target_vector(targets.begin(), targets.end());
   FilterAndPrintTargets(&target_vector, out);
+}
+
+void GetTargetsContainingFile(Setup* setup,
+                              const std::vector<const Target*>& all_targets,
+                              const SourceFile& file,
+                              bool default_toolchain_only,
+                              std::vector<TargetContainingFile>* matches) {
+  Label default_toolchain = setup->loader()->default_toolchain_label();
+  for (auto* target : all_targets) {
+    if (default_toolchain_only) {
+      // Only check targets in the default toolchain.
+      if (target->label().GetToolchainLabel() != default_toolchain)
+        continue;
+    }
+    if (auto how = TargetContainsFile(target, file))
+      matches->emplace_back(target, *how);
+  }
 }
 
 }  // namespace commands

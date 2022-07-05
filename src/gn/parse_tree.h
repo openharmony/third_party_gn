@@ -8,10 +8,10 @@
 #include <stddef.h>
 
 #include <memory>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/values.h"
 #include "gn/err.h"
 #include "gn/token.h"
@@ -68,7 +68,8 @@ class Comments {
   // following the expression.
   std::vector<Token> after_;
 
-  DISALLOW_COPY_AND_ASSIGN(Comments);
+  Comments(const Comments&) = delete;
+  Comments& operator=(const Comments&) = delete;
 };
 
 // ParseNode -------------------------------------------------------------------
@@ -83,7 +84,7 @@ class ParseNode {
   virtual const BinaryOpNode* AsBinaryOp() const;
   virtual const BlockCommentNode* AsBlockComment() const;
   virtual const BlockNode* AsBlock() const;
-  virtual const ConditionNode* AsConditionNode() const;
+  virtual const ConditionNode* AsCondition() const;
   virtual const EndNode* AsEnd() const;
   virtual const FunctionCallNode* AsFunctionCall() const;
   virtual const IdentifierNode* AsIdentifier() const;
@@ -108,12 +109,15 @@ class ParseNode {
   const Comments* comments() const { return comments_.get(); }
   Comments* comments_mutable();
 
+  static std::unique_ptr<ParseNode> BuildFromJSON(const base::Value& value);
+
  protected:
   // Helper functions for GetJSONNode. Creates and fills a Value object with
   // given type (and value).
-  base::Value CreateJSONNode(const char* type) const;
+  base::Value CreateJSONNode(const char* type, LocationRange location) const;
   base::Value CreateJSONNode(const char* type,
-                             const std::string_view& value) const;
+                             std::string_view value,
+                             LocationRange location) const;
 
  private:
   // Helper function for CreateJSONNode.
@@ -121,7 +125,8 @@ class ParseNode {
 
   std::unique_ptr<Comments> comments_;
 
-  DISALLOW_COPY_AND_ASSIGN(ParseNode);
+  ParseNode(const ParseNode&) = delete;
+  ParseNode& operator=(const ParseNode&) = delete;
 };
 
 // AccessorNode ----------------------------------------------------------------
@@ -161,6 +166,7 @@ class AccessorNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<AccessorNode> NewFromJSON(const base::Value& value);
 
   // Base is the thing on the left of the [] or dot, currently always required
   // to be an identifier token.
@@ -189,6 +195,8 @@ class AccessorNode : public ParseNode {
                                    size_t* computed_index,
                                    Err* err) const;
 
+  static constexpr const char* kDumpNodeName = "ACCESSOR";
+
  private:
   Value ExecuteSubscriptAccess(Scope* scope, Err* err) const;
   Value ExecuteArrayAccess(Scope* scope,
@@ -199,6 +207,10 @@ class AccessorNode : public ParseNode {
                                     Err* err) const;
   Value ExecuteScopeAccess(Scope* scope, Err* err) const;
 
+  static constexpr const char* kDumpAccessorKind = "accessor_kind";
+  static constexpr const char* kDumpAccessorKindSubscript = "subscript";
+  static constexpr const char* kDumpAccessorKindMember = "member";
+
   Token base_;
 
   // Either index or member will be set according to what type of access this
@@ -206,7 +218,8 @@ class AccessorNode : public ParseNode {
   std::unique_ptr<ParseNode> subscript_;
   std::unique_ptr<IdentifierNode> member_;
 
-  DISALLOW_COPY_AND_ASSIGN(AccessorNode);
+  AccessorNode(const AccessorNode&) = delete;
+  AccessorNode& operator=(const AccessorNode&) = delete;
 };
 
 // BinaryOpNode ----------------------------------------------------------------
@@ -223,6 +236,7 @@ class BinaryOpNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<BinaryOpNode> NewFromJSON(const base::Value& value);
 
   const Token& op() const { return op_; }
   void set_op(const Token& t) { op_ = t; }
@@ -235,12 +249,15 @@ class BinaryOpNode : public ParseNode {
     right_ = std::move(right);
   }
 
+  static constexpr const char* kDumpNodeName = "BINARY";
+
  private:
   std::unique_ptr<ParseNode> left_;
   Token op_;
   std::unique_ptr<ParseNode> right_;
 
-  DISALLOW_COPY_AND_ASSIGN(BinaryOpNode);
+  BinaryOpNode(const BinaryOpNode&) = delete;
+  BinaryOpNode& operator=(const BinaryOpNode&) = delete;
 };
 
 // BlockNode -------------------------------------------------------------------
@@ -268,6 +285,7 @@ class BlockNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<BlockNode> NewFromJSON(const base::Value& value);
 
   void set_begin_token(const Token& t) { begin_token_ = t; }
   void set_end(std::unique_ptr<EndNode> e) { end_ = std::move(e); }
@@ -282,7 +300,14 @@ class BlockNode : public ParseNode {
     statements_.push_back(std::move(s));
   }
 
+  static constexpr const char* kDumpNodeName = "BLOCK";
+
  private:
+  static constexpr const char* kDumpResultMode = "result_mode";
+  static constexpr const char* kDumpResultModeReturnsScope = "returns_scope";
+  static constexpr const char* kDumpResultModeDiscardsResult =
+      "discards_result";
+
   const ResultMode result_mode_;
 
   // Tokens corresponding to { and }, if any (may be NULL). The end is stored
@@ -292,7 +317,8 @@ class BlockNode : public ParseNode {
 
   std::vector<std::unique_ptr<ParseNode>> statements_;
 
-  DISALLOW_COPY_AND_ASSIGN(BlockNode);
+  BlockNode(const BlockNode&) = delete;
+  BlockNode& operator=(const BlockNode&) = delete;
 };
 
 // ConditionNode ---------------------------------------------------------------
@@ -302,13 +328,14 @@ class ConditionNode : public ParseNode {
   ConditionNode();
   ~ConditionNode() override;
 
-  const ConditionNode* AsConditionNode() const override;
+  const ConditionNode* AsCondition() const override;
   Value Execute(Scope* scope, Err* err) const override;
   LocationRange GetRange() const override;
   Err MakeErrorDescribing(
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<ConditionNode> NewFromJSON(const base::Value& value);
 
   void set_if_token(const Token& token) { if_token_ = token; }
 
@@ -325,6 +352,8 @@ class ConditionNode : public ParseNode {
   const ParseNode* if_false() const { return if_false_.get(); }
   void set_if_false(std::unique_ptr<ParseNode> f) { if_false_ = std::move(f); }
 
+  static constexpr const char* kDumpNodeName = "CONDITION";
+
  private:
   // Token corresponding to the "if" string.
   Token if_token_;
@@ -333,7 +362,8 @@ class ConditionNode : public ParseNode {
   std::unique_ptr<BlockNode> if_true_;    // Always non-null.
   std::unique_ptr<ParseNode> if_false_;   // May be null.
 
-  DISALLOW_COPY_AND_ASSIGN(ConditionNode);
+  ConditionNode(const ConditionNode&) = delete;
+  ConditionNode& operator=(const ConditionNode&) = delete;
 };
 
 // FunctionCallNode ------------------------------------------------------------
@@ -350,6 +380,8 @@ class FunctionCallNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<FunctionCallNode> NewFromJSON(
+      const base::Value& value);
 
   const Token& function() const { return function_; }
   void set_function(Token t) { function_ = t; }
@@ -362,12 +394,15 @@ class FunctionCallNode : public ParseNode {
 
   void SetNewLocation(int line_number);
 
+  static constexpr const char* kDumpNodeName = "FUNCTION";
+
  private:
   Token function_;
   std::unique_ptr<ListNode> args_;
   std::unique_ptr<BlockNode> block_;  // May be null.
 
-  DISALLOW_COPY_AND_ASSIGN(FunctionCallNode);
+  FunctionCallNode(const FunctionCallNode&) = delete;
+  FunctionCallNode& operator=(const FunctionCallNode&) = delete;
 };
 
 // IdentifierNode --------------------------------------------------------------
@@ -385,16 +420,20 @@ class IdentifierNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<IdentifierNode> NewFromJSON(const base::Value& value);
 
   const Token& value() const { return value_; }
   void set_value(const Token& t) { value_ = t; }
 
   void SetNewLocation(int line_number);
 
+  static constexpr const char* kDumpNodeName = "IDENTIFIER";
+
  private:
   Token value_;
 
-  DISALLOW_COPY_AND_ASSIGN(IdentifierNode);
+  IdentifierNode(const IdentifierNode&) = delete;
+  IdentifierNode& operator=(const IdentifierNode&) = delete;
 };
 
 // ListNode --------------------------------------------------------------------
@@ -411,6 +450,7 @@ class ListNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<ListNode> NewFromJSON(const base::Value& value);
 
   void set_begin_token(const Token& t) { begin_token_ = t; }
   const Token& Begin() const { return begin_token_; }
@@ -425,7 +465,7 @@ class ListNode : public ParseNode {
   }
 
   void SortAsStringsList();
-  void SortAsDepsList();
+  void SortAsTargetsList();
 
   struct SortRange {
     size_t begin;
@@ -434,6 +474,8 @@ class ListNode : public ParseNode {
   };
   // Only public for testing.
   std::vector<SortRange> GetSortRanges() const;
+
+  static constexpr const char* kDumpNodeName = "LIST";
 
  private:
   template <typename Comparator>
@@ -446,7 +488,8 @@ class ListNode : public ParseNode {
 
   std::vector<std::unique_ptr<const ParseNode>> contents_;
 
-  DISALLOW_COPY_AND_ASSIGN(ListNode);
+  ListNode(const ListNode&) = delete;
+  ListNode& operator=(const ListNode&) = delete;
 };
 
 // LiteralNode -----------------------------------------------------------------
@@ -464,16 +507,20 @@ class LiteralNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<LiteralNode> NewFromJSON(const base::Value& value);
 
   const Token& value() const { return value_; }
   void set_value(const Token& t) { value_ = t; }
 
   void SetNewLocation(int line_number);
 
+  static constexpr const char* kDumpNodeName = "LITERAL";
+
  private:
   Token value_;
 
-  DISALLOW_COPY_AND_ASSIGN(LiteralNode);
+  LiteralNode(const LiteralNode&) = delete;
+  LiteralNode& operator=(const LiteralNode&) = delete;
 };
 
 // UnaryOpNode -----------------------------------------------------------------
@@ -490,6 +537,7 @@ class UnaryOpNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<UnaryOpNode> NewFromJSON(const base::Value& value);
 
   const Token& op() const { return op_; }
   void set_op(const Token& t) { op_ = t; }
@@ -499,11 +547,14 @@ class UnaryOpNode : public ParseNode {
     operand_ = std::move(operand);
   }
 
+  static constexpr const char* kDumpNodeName = "UNARY";
+
  private:
   Token op_;
   std::unique_ptr<ParseNode> operand_;
 
-  DISALLOW_COPY_AND_ASSIGN(UnaryOpNode);
+  UnaryOpNode(const UnaryOpNode&) = delete;
+  UnaryOpNode& operator=(const UnaryOpNode&) = delete;
 };
 
 // BlockCommentNode ------------------------------------------------------------
@@ -525,14 +576,19 @@ class BlockCommentNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<BlockCommentNode> NewFromJSON(
+      const base::Value& value);
 
   const Token& comment() const { return comment_; }
   void set_comment(const Token& t) { comment_ = t; }
 
+  static constexpr const char* kDumpNodeName = "BLOCK_COMMENT";
+
  private:
   Token comment_;
 
-  DISALLOW_COPY_AND_ASSIGN(BlockCommentNode);
+  BlockCommentNode(const BlockCommentNode&) = delete;
+  BlockCommentNode& operator=(const BlockCommentNode&) = delete;
 };
 
 // EndNode ---------------------------------------------------------------------
@@ -553,14 +609,18 @@ class EndNode : public ParseNode {
       const std::string& msg,
       const std::string& help = std::string()) const override;
   base::Value GetJSONNode() const override;
+  static std::unique_ptr<EndNode> NewFromJSON(const base::Value& value);
 
   const Token& value() const { return value_; }
   void set_value(const Token& t) { value_ = t; }
 
+  static constexpr const char* kDumpNodeName = "END";
+
  private:
   Token value_;
 
-  DISALLOW_COPY_AND_ASSIGN(EndNode);
+  EndNode(const EndNode&) = delete;
+  EndNode& operator=(const EndNode&) = delete;
 };
 
 #endif  // TOOLS_GN_PARSE_TREE_H_

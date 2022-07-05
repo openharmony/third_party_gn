@@ -4,6 +4,7 @@
 
 #include "gn/tool.h"
 
+#include "gn/builtin_tool.h"
 #include "gn/c_tool.h"
 #include "gn/general_tool.h"
 #include "gn/rust_tool.h"
@@ -26,6 +27,7 @@ void Tool::SetToolComplete() {
   outputs_.FillRequiredTypes(&substitution_bits_);
   rspfile_.FillRequiredTypes(&substitution_bits_);
   rspfile_content_.FillRequiredTypes(&substitution_bits_);
+  partial_outputs_.FillRequiredTypes(&substitution_bits_);
 }
 
 GeneralTool* Tool::AsGeneral() {
@@ -48,6 +50,13 @@ RustTool* Tool::AsRust() {
   return nullptr;
 }
 const RustTool* Tool::AsRust() const {
+  return nullptr;
+}
+
+BuiltinTool* Tool::AsBuiltin() {
+  return nullptr;
+}
+const BuiltinTool* Tool::AsBuiltin() const {
   return nullptr;
 }
 
@@ -205,6 +214,14 @@ bool Tool::InitTool(Scope* scope, Toolchain* toolchain, Err* err) {
       !ReadLabel(scope, "pool", toolchain->label(), &pool_, err)) {
     return false;
   }
+  const bool command_is_required = name_ != GeneralTool::kGeneralToolAction;
+  if (command_.empty() == command_is_required) {
+    *err = Err(defined_from(), "This tool's command is bad.",
+               command_is_required
+                   ? "This tool requires \"command\" to be defined."
+                   : "This tool doesn't support \"command\".");
+    return false;
+  }
   return true;
 }
 
@@ -245,6 +262,8 @@ std::unique_ptr<Tool> Tool::CreateTool(const std::string& name) {
     return std::make_unique<CTool>(CTool::kCToolCc);
   else if (name == CTool::kCToolCxx)
     return std::make_unique<CTool>(CTool::kCToolCxx);
+  else if (name == CTool::kCToolCxxModule)
+    return std::make_unique<CTool>(CTool::kCToolCxxModule);
   else if (name == CTool::kCToolObjC)
     return std::make_unique<CTool>(CTool::kCToolObjC);
   else if (name == CTool::kCToolObjCxx)
@@ -253,6 +272,8 @@ std::unique_ptr<Tool> Tool::CreateTool(const std::string& name) {
     return std::make_unique<CTool>(CTool::kCToolRc);
   else if (name == CTool::kCToolAsm)
     return std::make_unique<CTool>(CTool::kCToolAsm);
+  else if (name == CTool::kCToolSwift)
+    return std::make_unique<CTool>(CTool::kCToolSwift);
   else if (name == CTool::kCToolAlink)
     return std::make_unique<CTool>(CTool::kCToolAlink);
   else if (name == CTool::kCToolSolink)
@@ -300,6 +321,8 @@ const char* Tool::GetToolTypeForSourceType(SourceFile::Type type) {
       return CTool::kCToolCc;
     case SourceFile::SOURCE_CPP:
       return CTool::kCToolCxx;
+    case SourceFile::SOURCE_MODULEMAP:
+      return CTool::kCToolCxxModule;
     case SourceFile::SOURCE_M:
       return CTool::kCToolObjC;
     case SourceFile::SOURCE_MM:
@@ -311,6 +334,8 @@ const char* Tool::GetToolTypeForSourceType(SourceFile::Type type) {
       return CTool::kCToolRc;
     case SourceFile::SOURCE_RS:
       return RustTool::kRsToolBin;
+    case SourceFile::SOURCE_SWIFT:
+      return CTool::kCToolSwift;
     case SourceFile::SOURCE_UNKNOWN:
     case SourceFile::SOURCE_H:
     case SourceFile::SOURCE_O:
@@ -325,28 +350,11 @@ const char* Tool::GetToolTypeForSourceType(SourceFile::Type type) {
 
 // static
 const char* Tool::GetToolTypeForTargetFinalOutput(const Target* target) {
-  // The contents of this list might be suprising (i.e. stamp tool for copy
+  // The contents of this list might be surprising (i.e. phony tool for copy
   // rules). See the header for why.
   // TODO(crbug.com/gn/39): Don't emit stamp files for single-output targets.
   if (target->source_types_used().RustSourceUsed()) {
-    switch (target->rust_values().crate_type()) {
-      case RustValues::CRATE_AUTO: {
-        switch (target->output_type()) {
-          case Target::EXECUTABLE:
-            return RustTool::kRsToolBin;
-          case Target::SHARED_LIBRARY:
-            return RustTool::kRsToolDylib;
-          case Target::STATIC_LIBRARY:
-            return RustTool::kRsToolStaticlib;
-          case Target::RUST_LIBRARY:
-            return RustTool::kRsToolRlib;
-          case Target::RUST_PROC_MACRO:
-            return RustTool::kRsToolMacro;
-          default:
-            break;
-        }
-        break;
-      }
+    switch (target->rust_values().InferredCrateType(target)) {
       case RustValues::CRATE_BIN:
         return RustTool::kRsToolBin;
       case RustValues::CRATE_CDYLIB:
@@ -359,13 +367,13 @@ const char* Tool::GetToolTypeForTargetFinalOutput(const Target* target) {
         return RustTool::kRsToolRlib;
       case RustValues::CRATE_STATICLIB:
         return RustTool::kRsToolStaticlib;
+      case RustValues::CRATE_AUTO:
+        break;
       default:
         NOTREACHED();
     }
   }
   switch (target->output_type()) {
-    case Target::GROUP:
-      return GeneralTool::kGeneralToolStamp;
     case Target::EXECUTABLE:
       return CTool::kCToolLink;
     case Target::SHARED_LIBRARY:
@@ -374,15 +382,19 @@ const char* Tool::GetToolTypeForTargetFinalOutput(const Target* target) {
       return CTool::kCToolSolinkModule;
     case Target::STATIC_LIBRARY:
       return CTool::kCToolAlink;
-    case Target::SOURCE_SET:
-      return GeneralTool::kGeneralToolStamp;
     case Target::ACTION:
     case Target::ACTION_FOREACH:
     case Target::BUNDLE_DATA:
-    case Target::CREATE_BUNDLE:
     case Target::COPY_FILES:
+    case Target::CREATE_BUNDLE:
     case Target::GENERATED_FILE:
-      return GeneralTool::kGeneralToolStamp;
+    case Target::GROUP:
+    case Target::SOURCE_SET:
+      if (target->settings()->build_settings()->no_stamp_files()) {
+        return BuiltinTool::kBuiltinToolPhony;
+      } else {
+        return GeneralTool::kGeneralToolStamp;
+      }
     default:
       NOTREACHED();
       return kToolNone;

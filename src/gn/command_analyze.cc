@@ -23,7 +23,7 @@ const char kAnalyze[] = "analyze";
 const char kAnalyze_HelpShort[] =
     "analyze: Analyze which targets are affected by a list of files.";
 const char kAnalyze_Help[] =
-    R"(gn analyze <out_dir> <input_path> <output_path>
+    R"*(gn analyze <out_dir> <input_path> <output_path>
 
   Analyze which targets are affected by a list of files.
 
@@ -38,10 +38,10 @@ const char kAnalyze_Help[] =
    - "test_targets": A list of the labels for targets that are needed to run
      the tests we wish to run.
 
-   - "additional_compile_targets": A list of the labels for targets that we
-     wish to rebuild, but aren't necessarily needed for testing. The important
-     difference between this field and "test_targets" is that if an item in
-     the additional_compile_targets list refers to a group, then any
+   - "additional_compile_targets" (optional): A list of the labels for targets
+     that we wish to rebuild, but aren't necessarily needed for testing. The
+     important difference between this field and "test_targets" is that if an
+     item in the additional_compile_targets list refers to a group, then any
      dependencies of that group will be returned if they are out of date, but
      the group itself does not need to be. If the dependencies themselves are
      groups, the same filtering is repeated. This filtering can be used to
@@ -51,6 +51,8 @@ const char kAnalyze_Help[] =
 
      This filtering behavior is also known as "pruning" the list of compile
      targets.
+
+     If "additional_compile_targets" is absent, it defaults to the empty list.
 
   If input_path is -, input is read from stdin.
 
@@ -75,7 +77,7 @@ const char kAnalyze_Help[] =
 
        - "Found dependency"
        - "No dependency"
-       - "Found dependency (all) "
+       - "Found dependency (all)"
 
      In the first case, the lists returned in compile_targets and test_targets
      should be passed to ninja to build. In the second case, nothing was
@@ -95,11 +97,11 @@ const char kAnalyze_Help[] =
   "error" key is non-empty and a non-fatal error occurred. In other words, it
   tries really hard to always write something to the output JSON and convey
   errors that way rather than via return codes.
-)";
+)*";
 
 int RunAnalyze(const std::vector<std::string>& args) {
   if (args.size() != 3) {
-    Err(Location(), "You're holding it wrong.",
+    Err(Location(), "Unknown command format. See \"gn help analyze\"",
         "Usage: \"gn analyze <out_dir> <input_path> <output_path>")
         .PrintToStdout();
     return 1;

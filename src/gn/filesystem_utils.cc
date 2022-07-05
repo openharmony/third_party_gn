@@ -7,9 +7,9 @@
 #include <algorithm>
 
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "gn/file_writer.h"
 #include "gn/location.h"
 #include "gn/settings.h"
 #include "gn/source_dir.h"
@@ -81,8 +81,7 @@ inline char NormalizeWindowsPathChar(char c) {
 
 // Attempts to do a case and slash-insensitive comparison of two 8-bit Windows
 // paths.
-bool AreAbsoluteWindowsPathsEqual(const std::string_view& a,
-                                  const std::string_view& b) {
+bool AreAbsoluteWindowsPathsEqual(std::string_view a, std::string_view b) {
   if (a.size() != b.size())
     return false;
 
@@ -95,7 +94,7 @@ bool AreAbsoluteWindowsPathsEqual(const std::string_view& a,
   return true;
 }
 
-bool DoesBeginWindowsDriveLetter(const std::string_view& path) {
+bool DoesBeginWindowsDriveLetter(std::string_view path) {
   if (path.size() < 3)
     return false;
 
@@ -200,7 +199,7 @@ void AppendFixedAbsolutePathSuffix(const BuildSettings* build_settings,
   }
 }
 
-size_t AbsPathLenWithNoTrailingSlash(const std::string_view& path) {
+size_t AbsPathLenWithNoTrailingSlash(std::string_view path) {
   size_t len = path.size();
 #if defined(OS_WIN)
   size_t min_len = 3;
@@ -222,7 +221,7 @@ std::string FilePathToUTF8(const base::FilePath::StringType& str) {
 #endif
 }
 
-base::FilePath UTF8ToFilePath(const std::string_view& sp) {
+base::FilePath UTF8ToFilePath(std::string_view sp) {
 #if defined(OS_WIN)
   return base::FilePath(base::UTF8ToUTF16(sp));
 #else
@@ -283,7 +282,7 @@ void RemoveFilename(std::string* path) {
   path->resize(FindFilenameOffset(*path));
 }
 
-bool EndsWithSlash(const std::string& s) {
+bool EndsWithSlash(std::string_view s) {
   return !s.empty() && IsSlash(s[s.size() - 1]);
 }
 
@@ -334,7 +333,7 @@ bool EnsureStringIsInOutputDir(const SourceDir& output_dir,
   return false;
 }
 
-bool IsPathAbsolute(const std::string_view& path) {
+bool IsPathAbsolute(std::string_view path) {
   if (path.empty())
     return false;
 
@@ -355,12 +354,12 @@ bool IsPathAbsolute(const std::string_view& path) {
   return true;
 }
 
-bool IsPathSourceAbsolute(const std::string_view& path) {
+bool IsPathSourceAbsolute(std::string_view path) {
   return (path.size() >= 2 && path[0] == '/' && path[1] == '/');
 }
 
-bool MakeAbsolutePathRelativeIfPossible(const std::string_view& source_root,
-                                        const std::string_view& path,
+bool MakeAbsolutePathRelativeIfPossible(std::string_view source_root,
+                                        std::string_view path,
                                         std::string* dest) {
   DCHECK(IsPathAbsolute(source_root));
   DCHECK(IsPathAbsolute(path));
@@ -415,7 +414,7 @@ bool MakeAbsolutePathRelativeIfPossible(const std::string_view& source_root,
   // part after it.
 
   if (!IsSlash(path[after_common_index])) {
-    // path is ${source-root}SUFIX/...
+    // path is ${source-root}SUFFIX/...
     return false;
   }
   // A source-root relative path, The input may have an unknown number of
@@ -440,7 +439,7 @@ bool MakeAbsolutePathRelativeIfPossible(const std::string_view& source_root,
       *dest = "//";
       return true;
     } else if (!IsSlash(path[source_root_len])) {
-      // path is ${source-root}SUFIX/...
+      // path is ${source-root}SUFFIX/...
       return false;
     }
     // A source-root relative path, The input may have an unknown number of
@@ -504,7 +503,7 @@ base::FilePath MakeAbsoluteFilePathRelativeIfPossible(
   return base::FilePath(base::JoinString(relative_components, separator));
 }
 
-void NormalizePath(std::string* path, const std::string_view& source_root) {
+void NormalizePath(std::string* path, std::string_view source_root) {
   char* pathbuf = path->empty() ? nullptr : &(*path)[0];
 
   // top_index is the first character we can modify in the path. Anything
@@ -589,7 +588,7 @@ void NormalizePath(std::string* path, const std::string_view& source_root) {
 
                 // |path| is now absolute, so |top_index| is 1. |dest_i| and
                 // |src_i| should be incremented to keep the same relative
-                // position. Comsume the leading "//" by decrementing |dest_i|.
+                // position. Consume the leading "//" by decrementing |dest_i|.
                 top_index = 1;
                 pathbuf = &(*path)[0];
                 dest_i += source_root_len - 2;
@@ -610,7 +609,7 @@ void NormalizePath(std::string* path, const std::string_view& source_root) {
             src_i += consumed_len;
         }
       } else {
-        // Dot not preceeded by a slash, copy it literally.
+        // Dot not preceded by a slash, copy it literally.
         pathbuf[dest_i++] = pathbuf[src_i++];
       }
     } else if (IsSlash(pathbuf[src_i])) {
@@ -618,7 +617,7 @@ void NormalizePath(std::string* path, const std::string_view& source_root) {
         // Two slashes in a row, skip over it.
         src_i++;
       } else {
-        // Just one slash, copy it, normalizing to foward slash.
+        // Just one slash, copy it, normalizing to forward slash.
         pathbuf[dest_i] = '/';
         dest_i++;
         src_i++;
@@ -671,14 +670,16 @@ std::string MakeRelativePath(const std::string& input,
   }
 #endif
 
+  DCHECK(EndsWithSlash(dest));
   std::string ret;
 
   // Skip the common prefixes of the source and dest as long as they end in
-  // a [back]slash.
+  // a [back]slash or end the string. dest always ends with a (back)slash in
+  // this function, so checking dest for just that is sufficient.
   size_t common_prefix_len = 0;
   size_t max_common_length = std::min(input.size(), dest.size());
-  for (size_t i = common_prefix_len; i < max_common_length; i++) {
-    if (IsSlash(input[i]) && IsSlash(dest[i]))
+  for (size_t i = common_prefix_len; i <= max_common_length; i++) {
+    if ((IsSlash(input[i]) || input[i] == '\0') && IsSlash(dest[i]))
       common_prefix_len = i + 1;
     else if (input[i] != dest[i])
       break;
@@ -691,7 +692,10 @@ std::string MakeRelativePath(const std::string& input,
   }
 
   // Append any remaining unique input.
-  ret.append(&input[common_prefix_len], input.size() - common_prefix_len);
+  if (common_prefix_len <= input.size())
+    ret.append(&input[common_prefix_len], input.size() - common_prefix_len);
+  else if (input.back() != '/' && !ret.empty())
+    ret.pop_back();
 
   // If the result is still empty, the paths are the same.
   if (ret.empty())
@@ -702,7 +706,7 @@ std::string MakeRelativePath(const std::string& input,
 
 std::string RebasePath(const std::string& input,
                        const SourceDir& dest_dir,
-                       const std::string_view& source_root) {
+                       std::string_view source_root) {
   std::string ret;
   DCHECK(source_root.empty() ||
          !base::EndsWith(source_root, "/", base::CompareCase::SENSITIVE));
@@ -745,7 +749,7 @@ std::string RebasePath(const std::string& input,
     }
     ret = MakeRelativePath(input_full, dest_full);
     if (remove_slash && ret.size() > 1)
-      ret.resize(ret.size() - 1);
+      ret.pop_back();
     return ret;
   }
 
@@ -780,11 +784,10 @@ base::FilePath ResolvePath(const std::string& value,
       .NormalizePathSeparatorsTo('/');
 }
 
-template <typename StringType>
-std::string ResolveRelative(const StringType& input,
+std::string ResolveRelative(std::string_view input,
                             const std::string& value,
                             bool as_file,
-                            const std::string_view& source_root) {
+                            std::string_view source_root) {
   std::string result;
 
   if (input.size() >= 2 && input[0] == '/' && input[1] == '/') {
@@ -833,7 +836,7 @@ std::string ResolveRelative(const StringType& input,
 
   // With no source_root, there's nothing we can do about
   // e.g. input=../../../path/to/file and value=//source and we'll
-  // errornously return //file.
+  // erroneously return //file.
   result.reserve(value.size() + input.size());
   result.assign(value);
   result.append(input.data(), input.size());
@@ -844,17 +847,6 @@ std::string ResolveRelative(const StringType& input,
 
   return result;
 }
-
-// Explicit template instantiation
-template std::string ResolveRelative(const std::string_view& input,
-                                     const std::string& value,
-                                     bool as_file,
-                                     const std::string_view& source_root);
-
-template std::string ResolveRelative(const std::string& input,
-                                     const std::string& value,
-                                     bool as_file,
-                                     const std::string_view& source_root);
 
 std::string DirectoryWithNoLastSlash(const SourceDir& dir) {
   std::string ret;
@@ -947,15 +939,6 @@ bool ContentsEqual(const base::FilePath& file_path, const std::string& data) {
   return file_data == data;
 }
 
-bool WriteFileIfChanged(const base::FilePath& file_path,
-                        const std::string& data,
-                        Err* err) {
-  if (ContentsEqual(file_path, data))
-    return true;
-
-  return WriteFile(file_path, data, err);
-}
-
 bool WriteFile(const base::FilePath& file_path,
                const std::string& data,
                Err* err) {
@@ -969,44 +952,10 @@ bool WriteFile(const base::FilePath& file_path,
     return false;
   }
 
-  int size = static_cast<int>(data.size());
-  bool write_success = false;
-
-#if defined(OS_WIN)
-  // On Windows, provide a custom implementation of base::WriteFile. Sometimes
-  // the base version fails, especially on the bots. The guess is that Windows
-  // Defender or other antivirus programs still have the file open (after
-  // checking for the read) when the write happens immediately after. This
-  // version opens with FILE_SHARE_READ (normally not what you want when
-  // replacing the entire contents of the file) which lets us continue even if
-  // another program has the file open for reading. See http://crbug.com/468437
-  base::win::ScopedHandle file(::CreateFile(
-      reinterpret_cast<LPCWSTR>(file_path.value().c_str()), GENERIC_WRITE,
-      FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL));
-  if (file.IsValid()) {
-    DWORD written;
-    BOOL result = ::WriteFile(file.Get(), data.c_str(), size, &written, NULL);
-    if (result) {
-      if (static_cast<int>(written) == size) {
-        write_success = true;
-      } else {
-        // Didn't write all the bytes.
-        LOG(ERROR) << "wrote" << written << " bytes to "
-                   << base::UTF16ToUTF8(file_path.value()) << " expected "
-                   << size;
-      }
-    } else {
-      // WriteFile failed.
-      PLOG(ERROR) << "writing file " << base::UTF16ToUTF8(file_path.value())
-                  << " failed";
-    }
-  } else {
-    PLOG(ERROR) << "CreateFile failed for path "
-                << base::UTF16ToUTF8(file_path.value());
-  }
-#else
-  write_success = base::WriteFile(file_path, data.c_str(), size) == size;
-#endif
+  FileWriter writer;
+  writer.Create(file_path);
+  writer.Write(data);
+  bool write_success = writer.Close();
 
   if (!write_success && err) {
     *err = Err(Location(), "Unable to write file.",
@@ -1057,6 +1006,8 @@ OutputFile GetBuildDirAsOutputFile(const BuildDirContext& context,
     result.value().append("gen/");
   else if (type == BuildDirType::OBJ)
     result.value().append("obj/");
+  else if (type == BuildDirType::PHONY)
+    result.value().append("phony/");
   return result;
 }
 
@@ -1074,10 +1025,25 @@ OutputFile GetSubBuildDirAsOutputFile(const BuildDirContext& context,
   OutputFile result = GetBuildDirAsOutputFile(context, type);
 
   if (source_dir.is_source_absolute()) {
-    // The source dir is source-absolute, so we trim off the two leading
-    // slashes to append to the toolchain object directory.
-    result.value().append(&source_dir.value()[2],
-                          source_dir.value().size() - 2);
+    std::string_view build_dir = context.build_settings->build_dir().value();
+    std::string_view source_dir_path = source_dir.value();
+    if (source_dir_path.substr(0, build_dir.size()) == build_dir) {
+      // The source dir is source-absolute, but in the build directory
+      // (e.g. `//out/Debug/gen/src/foo.cc` or
+      // `//out/Debug/toolchain1/gen/foo.cc`), which happens for generated
+      // sources. In this case, remove the build directory prefix, and replace
+      // it with `BUILD_DIR`. This will create results like `obj/BUILD_DIR/gen`
+      // or `toolchain2/obj/BUILD_DIR/toolchain1/gen` which look surprising,
+      // but guarantee unicity.
+      result.value().append("BUILD_DIR/");
+      result.value().append(&source_dir_path[build_dir.size()],
+                            source_dir_path.size() - build_dir.size());
+    } else {
+      // The source dir is source-absolute, so we trim off the two leading
+      // slashes to append to the toolchain object directory.
+      result.value().append(&source_dir.value()[2],
+                            source_dir.value().size() - 2);
+    }
   } else {
     // System-absolute.
     AppendFixedAbsolutePathSuffix(context.build_settings, source_dir, &result);

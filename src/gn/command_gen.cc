@@ -12,11 +12,14 @@
 #include "gn/commands.h"
 #include "gn/compile_commands_writer.h"
 #include "gn/eclipse_writer.h"
+#include "gn/filesystem_utils.h"
 #include "gn/json_project_writer.h"
 #include "gn/ninja_target_writer.h"
+#include "gn/ninja_tools.h"
 #include "gn/ninja_writer.h"
 #include "gn/qt_creator_writer.h"
 #include "gn/runtime_deps.h"
+#include "gn/rust_project_writer.h"
 #include "gn/scheduler.h"
 #include "gn/setup.h"
 #include "gn/standard_out.h"
@@ -30,6 +33,7 @@ namespace commands {
 namespace {
 
 const char kSwitchCheck[] = "check";
+const char kSwitchCleanStale[] = "clean-stale";
 const char kSwitchFilters[] = "filters";
 const char kSwitchIde[] = "ide";
 const char kSwitchIdeValueEclipse[] = "eclipse";
@@ -39,19 +43,24 @@ const char kSwitchIdeValueVs2013[] = "vs2013";
 const char kSwitchIdeValueVs2015[] = "vs2015";
 const char kSwitchIdeValueVs2017[] = "vs2017";
 const char kSwitchIdeValueVs2019[] = "vs2019";
+const char kSwitchIdeValueVs2022[] = "vs2022";
 const char kSwitchIdeValueWinSdk[] = "winsdk";
 const char kSwitchIdeValueXcode[] = "xcode";
 const char kSwitchIdeValueJson[] = "json";
+const char kSwitchIdeRootTarget[] = "ide-root-target";
 const char kSwitchNinjaExecutable[] = "ninja-executable";
 const char kSwitchNinjaExtraArgs[] = "ninja-extra-args";
 const char kSwitchNoDeps[] = "no-deps";
-const char kSwitchRootTarget[] = "root-target";
 const char kSwitchSln[] = "sln";
-const char kSwitchWorkspace[] = "workspace";
+const char kSwitchXcodeProject[] = "xcode-project";
+const char kSwitchXcodeBuildSystem[] = "xcode-build-system";
+const char kSwitchXcodeBuildsystemValueLegacy[] = "legacy";
+const char kSwitchXcodeBuildsystemValueNew[] = "new";
 const char kSwitchJsonFileName[] = "json-file-name";
 const char kSwitchJsonIdeScript[] = "json-ide-script";
 const char kSwitchJsonIdeScriptArgs[] = "json-ide-script-args";
 const char kSwitchExportCompileCommands[] = "export-compile-commands";
+const char kSwitchExportRustProject[] = "export-rust-project";
 
 // Collects Ninja rules for each toolchain. The lock protectes the rules.
 struct TargetWriteInfo {
@@ -202,7 +211,7 @@ bool RunIdeWriter(const std::string& ide,
     return res;
   } else if (ide == kSwitchIdeValueVs || ide == kSwitchIdeValueVs2013 ||
              ide == kSwitchIdeValueVs2015 || ide == kSwitchIdeValueVs2017 ||
-             ide == kSwitchIdeValueVs2019) {
+             ide == kSwitchIdeValueVs2019 || ide == kSwitchIdeValueVs2022) {
     VisualStudioWriter::Version version = VisualStudioWriter::Version::Vs2019;
     if (ide == kSwitchIdeValueVs2013)
       version = VisualStudioWriter::Version::Vs2013;
@@ -210,6 +219,8 @@ bool RunIdeWriter(const std::string& ide,
       version = VisualStudioWriter::Version::Vs2015;
     else if (ide == kSwitchIdeValueVs2017)
       version = VisualStudioWriter::Version::Vs2017;
+    else if (ide == kSwitchIdeValueVs2022)
+      version = VisualStudioWriter::Version::Vs2022;
 
     std::string sln_name;
     if (command_line->HasSwitch(kSwitchSln))
@@ -221,13 +232,19 @@ bool RunIdeWriter(const std::string& ide,
     if (command_line->HasSwitch(kSwitchIdeValueWinSdk))
       win_kit = command_line->GetSwitchValueASCII(kSwitchIdeValueWinSdk);
     std::string ninja_extra_args;
-    if (command_line->HasSwitch(kSwitchNinjaExtraArgs))
+    if (command_line->HasSwitch(kSwitchNinjaExtraArgs)) {
       ninja_extra_args =
           command_line->GetSwitchValueASCII(kSwitchNinjaExtraArgs);
+    }
+    std::string ninja_executable;
+    if (command_line->HasSwitch(kSwitchNinjaExecutable)) {
+      ninja_executable =
+          command_line->GetSwitchValueASCII(kSwitchNinjaExecutable);
+    }
     bool no_deps = command_line->HasSwitch(kSwitchNoDeps);
     bool res = VisualStudioWriter::RunAndWriteFiles(
         build_settings, builder, version, sln_name, filters, win_kit,
-        ninja_extra_args, no_deps, err);
+        ninja_extra_args, ninja_executable, no_deps, err);
     if (res && !quiet) {
       OutputString("Generating Visual Studio projects took " +
                    base::Int64ToString(timer.Elapsed().InMilliseconds()) +
@@ -235,13 +252,33 @@ bool RunIdeWriter(const std::string& ide,
     }
     return res;
   } else if (ide == kSwitchIdeValueXcode) {
-    bool res = XcodeWriter::RunAndWriteFiles(
-        command_line->GetSwitchValueASCII(kSwitchWorkspace),
-        command_line->GetSwitchValueASCII(kSwitchRootTarget),
+    XcodeWriter::Options options = {
+        command_line->GetSwitchValueASCII(kSwitchXcodeProject),
+        command_line->GetSwitchValueASCII(kSwitchIdeRootTarget),
         command_line->GetSwitchValueASCII(kSwitchNinjaExecutable),
-        command_line->GetSwitchValueASCII(kSwitchNinjaExtraArgs),
-        command_line->GetSwitchValueASCII(kSwitchFilters), build_settings,
-        builder, err);
+        command_line->GetSwitchValueASCII(kSwitchFilters),
+        XcodeBuildSystem::kLegacy,
+    };
+
+    if (options.project_name.empty()) {
+      options.project_name = "all";
+    }
+
+    const std::string build_system =
+        command_line->GetSwitchValueASCII(kSwitchXcodeBuildSystem);
+    if (!build_system.empty()) {
+      if (build_system == kSwitchXcodeBuildsystemValueNew) {
+        options.build_system = XcodeBuildSystem::kNew;
+      } else if (build_system == kSwitchXcodeBuildsystemValueLegacy) {
+        options.build_system = XcodeBuildSystem::kLegacy;
+      } else {
+        *err = Err(Location(), "Unknown build system: " + build_system);
+        return false;
+      }
+    }
+
+    bool res =
+        XcodeWriter::RunAndWriteFiles(build_settings, builder, options, err);
     if (res && !quiet) {
       OutputString("Generating Xcode projects took " +
                    base::Int64ToString(timer.Elapsed().InMilliseconds()) +
@@ -250,8 +287,8 @@ bool RunIdeWriter(const std::string& ide,
     return res;
   } else if (ide == kSwitchIdeValueQtCreator) {
     std::string root_target;
-    if (command_line->HasSwitch(kSwitchRootTarget))
-      root_target = command_line->GetSwitchValueASCII(kSwitchRootTarget);
+    if (command_line->HasSwitch(kSwitchIdeRootTarget))
+      root_target = command_line->GetSwitchValueASCII(kSwitchIdeRootTarget);
     bool res = QtCreatorWriter::RunAndWriteFile(build_settings, builder, err,
                                                 root_target);
     if (res && !quiet) {
@@ -286,6 +323,25 @@ bool RunIdeWriter(const std::string& ide,
   return false;
 }
 
+bool RunRustProjectWriter(const BuildSettings* build_settings,
+                          const Builder& builder,
+                          Err* err) {
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  bool quiet = command_line->HasSwitch(switches::kQuiet);
+  base::ElapsedTimer timer;
+
+  std::string file_name = "rust-project.json";
+  bool res = RustProjectWriter::RunAndWriteFiles(build_settings, builder,
+                                                 file_name, quiet, err);
+  if (res && !quiet) {
+    OutputString("Generating rust-project.json took " +
+                 base::Int64ToString(timer.Elapsed().InMilliseconds()) +
+                 "ms\n");
+  }
+  return res;
+}
+
 bool RunCompileCommandsWriter(const BuildSettings* build_settings,
                               const Builder& builder,
                               Err* err) {
@@ -306,6 +362,63 @@ bool RunCompileCommandsWriter(const BuildSettings* build_settings,
                  "ms\n");
   }
   return res;
+}
+
+bool RunNinjaPostProcessTools(const BuildSettings* build_settings,
+                              base::FilePath ninja_executable,
+                              bool is_regeneration,
+                              bool clean_stale,
+                              Err* err) {
+  // If the user did not specify an executable, skip running the post processing
+  // tools. Since these tools can re-write ninja build log and dep logs, it is
+  // really important that ninja executable used for tools matches the
+  // executable that is used for builds.
+  if (ninja_executable.empty()) {
+    if (clean_stale) {
+      *err = Err(Location(), "No --ninja-executable provided.",
+                 "--clean-stale requires a ninja executable to run. You can "
+                 "provide one on the command line via --ninja-executable.");
+      return false;
+    }
+
+    return true;
+  }
+
+  base::FilePath build_dir =
+      build_settings->GetFullPath(build_settings->build_dir());
+
+  if (clean_stale) {
+    if (build_settings->ninja_required_version() < Version{1, 10, 0}) {
+      *err = Err(Location(), "Need a ninja executable at least version 1.10.0.",
+                 "--clean-stale requires a ninja executable of version 1.10.0 "
+                 "or later.");
+      return false;
+    }
+
+    if (!InvokeNinjaCleanDeadTool(ninja_executable, build_dir, err)) {
+      return false;
+    }
+
+    if(!InvokeNinjaRecompactTool(ninja_executable, build_dir, err)) {
+      return false;
+    }
+  }
+
+  // If we have a ninja version that supports restat, we should restat the
+  // build.ninja file so the next ninja invocation will use the right mtime. If
+  // gen is being invoked as part of a re-gen (ie, ninja is invoking gn gen),
+  // then we can elide this restat, as ninja will restat build.ninja anyways
+  // after it is complete.
+  if (!is_regeneration &&
+      build_settings->ninja_required_version() >= Version{1, 10, 0}) {
+    std::vector<base::FilePath> files_to_restat{
+        base::FilePath(FILE_PATH_LITERAL("build.ninja"))};
+    if (!InvokeNinjaRestatTool(ninja_executable, build_dir, files_to_restat,
+                               err)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -329,9 +442,25 @@ const char kGen_Help[] =
 
   See "gn help switches" for the common command-line switches.
 
+General options
+
+  --ninja-executable=<string>
+      Can be used to specify the ninja executable to use. This executable will
+      be used as an IDE option to indicate which ninja to use for building. This
+      executable will also be used as part of the gen process for triggering a
+      restat on generated ninja files and for use with --clean-stale.
+
+  --clean-stale
+      This option will cause no longer needed output files to be removed from
+      the build directory, and their records pruned from the ninja build log and
+      dependency database after the ninja build graph has been generated. This
+      option requires a ninja executable of at least version 1.10.0. It can be
+      provided by the --ninja-executable switch. Also see "gn help clean_stale".
+
 IDE options
 
-  GN optionally generates files for IDE. Possibilities for <ide options>
+  GN optionally generates files for IDE. Files won't be overwritten if their
+  contents don't change. Possibilities for <ide options>
 
   --ide=<ide_name>
       Generate files for an IDE. Currently supported values:
@@ -342,6 +471,7 @@ IDE options
       "vs2015" - Visual Studio 2015 project/solution files.
       "vs2017" - Visual Studio 2017 project/solution files.
       "vs2019" - Visual Studio 2019 project/solution files.
+      "vs2022" - Visual Studio 2022 project/solution files.
       "xcode" - Xcode workspace/solution files.
       "qtcreator" - QtCreator project files.
       "json" - JSON file containing target information
@@ -367,15 +497,24 @@ Visual Studio Flags
       As an example, "10.0.15063.0" can be specified to use Creators Update SDK
       instead of the default one.
 
+  --ninja-executable=<string>
+      Can be used to specify the ninja executable to use when building.
+
   --ninja-extra-args=<string>
       This string is passed without any quoting to the ninja invocation
       command-line. Can be used to configure ninja flags, like "-j".
 
 Xcode Flags
 
-  --workspace=<file_name>
-      Override defaut workspace file name ("all"). The workspace file is
+  --xcode-project=<file_name>
+      Override default Xcode project file name ("all"). The project file is
       written to the root build directory.
+
+  --xcode-build-system=<value>
+      Configure the build system to use for the Xcode project. Supported
+      values are (default to "legacy"):
+      "legacy" - Legacy Build system
+      "new" - New Build System
 
   --ninja-executable=<string>
       Can be used to specify the ninja executable to use when building.
@@ -384,13 +523,13 @@ Xcode Flags
       This string is passed without any quoting to the ninja invocation
       command-line. Can be used to configure ninja flags, like "-j".
 
-  --root-target=<target_name>
+  --ide-root-target=<target_name>
       Name of the target corresponding to "All" target in Xcode. If unset,
       "All" invokes ninja without any target and builds everything.
 
 QtCreator Flags
 
-  --root-target=<target_name>
+  --ide-root-target=<target_name>
       Name of the root target for which the QtCreator project will be generated
       to contain files of it and its dependencies. If unset, the whole build
       graph will be emitted.
@@ -417,25 +556,37 @@ Generic JSON Output
       Overrides default file name (project.json) of generated JSON file.
 
   --json-ide-script=<path_to_python_script>
-      Executes python script after the JSON file is generated. Path can be
-      project absolute (//), system absolute (/) or relative, in which case the
-      output directory will be base. Path to generated JSON file will be first
-      argument when invoking script.
+      Executes python script after the JSON file is generated or updated with
+      new content. Path can be project absolute (//), system absolute (/) or
+      relative, in which case the output directory will be base. Path to
+      generated JSON file will be first argument when invoking script.
 
   --json-ide-script-args=<argument>
       Optional second argument that will passed to executed script.
 
 Compilation Database
 
+  --export-rust-project
+      Produces a rust-project.json file in the root of the build directory
+      This is used for various tools in the Rust ecosystem allowing for the
+      replay of individual compilations independent of the build system.
+      This is an unstable format and likely to change without warning.
+
   --export-compile-commands[=<target_name1,target_name2...>]
       Produces a compile_commands.json file in the root of the build directory
       containing an array of “command objects”, where each command object
       specifies one way a translation unit is compiled in the project. If a list
-      of target_name is supplied, only targets that are reachable from the list
-      of target_name will be used for “command objects” generation, otherwise
-      all available targets will be used. This is used for various Clang-based
-      tooling, allowing for the replay of individual compilations independent
-      of the build system.
+      of target_name is supplied, only targets that are reachable from any
+      target in any build file whose name is target_name will be used for
+      “command objects” generation, otherwise all available targets will be used.
+      This is used for various Clang-based tooling, allowing for the replay of
+      individual compilations independent of the build system.
+      e.g. "foo" will match:
+      - "//path/to/src:foo"
+      - "//other/path:foo"
+      - "//foo:foo"
+      and not match:
+      - "//foo:bar"
 )";
 
 int RunGen(const std::vector<std::string>& args) {
@@ -495,6 +646,15 @@ int RunGen(const std::vector<std::string>& args) {
     return 1;
   }
 
+  if (!RunNinjaPostProcessTools(
+          &setup->build_settings(),
+          command_line->GetSwitchValuePath(switches::kNinjaExecutable),
+          command_line->HasSwitch(switches::kRegeneration),
+          command_line->HasSwitch(kSwitchCleanStale), &err)) {
+    err.PrintToStdout();
+    return 1;
+  }
+
   if (!WriteRuntimeDepsFilesIfNecessary(&setup->build_settings(),
                                         setup->builder(), &err)) {
     err.PrintToStdout();
@@ -514,6 +674,12 @@ int RunGen(const std::vector<std::string>& args) {
   if (command_line->HasSwitch(kSwitchExportCompileCommands) &&
       !RunCompileCommandsWriter(&setup->build_settings(), setup->builder(),
                                 &err)) {
+    err.PrintToStdout();
+    return 1;
+  }
+
+  if (command_line->HasSwitch(kSwitchExportRustProject) &&
+      !RunRustProjectWriter(&setup->build_settings(), setup->builder(), &err)) {
     err.PrintToStdout();
     return 1;
   }

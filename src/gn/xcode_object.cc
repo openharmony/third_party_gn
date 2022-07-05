@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "gn/filesystem_utils.h"
 
@@ -137,11 +136,13 @@ const SourceTypeForExt kSourceTypeForExt[] = {
     {"xcconfig", "text.xcconfig"},
     {"xcdatamodel", "wrapper.xcdatamodel"},
     {"xcdatamodeld", "wrapper.xcdatamodeld"},
+    {"xctest", "wrapper.cfbundle"},
+    {"xpc", "wrapper.xpc-service"},
     {"xib", "file.xib"},
     {"y", "sourcecode.yacc"},
 };
 
-const char* GetSourceType(const std::string_view& ext) {
+const char* GetSourceType(std::string_view ext) {
   for (size_t i = 0; i < std::size(kSourceTypeForExt); ++i) {
     if (kSourceTypeForExt[i].ext == ext)
       return kSourceTypeForExt[i].source_type;
@@ -150,14 +151,23 @@ const char* GetSourceType(const std::string_view& ext) {
   return "text";
 }
 
-bool HasExplicitFileType(const std::string_view& ext) {
+bool HasExplicitFileType(std::string_view ext) {
   return ext == "dart";
 }
 
-bool IsSourceFileForIndexing(const std::string_view& ext) {
+bool IsSourceFileForIndexing(std::string_view ext) {
   return ext == "c" || ext == "cc" || ext == "cpp" || ext == "cxx" ||
          ext == "m" || ext == "mm";
 }
+
+// Wrapper around a const PBXObject* allowing to print just the object
+// identifier instead of a reference (i.e. identitifer and name). This
+// is used in a few place where Xcode uses the short identifier only.
+struct NoReference {
+  const PBXObject* value;
+
+  explicit NoReference(const PBXObject* value) : value(value) {}
+};
 
 void PrintValue(std::ostream& out, IndentRules rules, unsigned value) {
   out << value;
@@ -171,6 +181,10 @@ void PrintValue(std::ostream& out,
                 IndentRules rules,
                 const std::string& value) {
   out << EncodeString(value);
+}
+
+void PrintValue(std::ostream& out, IndentRules rules, const NoReference& obj) {
+  out << obj.value->id();
 }
 
 void PrintValue(std::ostream& out, IndentRules rules, const PBXObject* value) {
@@ -235,6 +249,25 @@ void PrintProperty(std::ostream& out,
   PrintValue(out, rules, std::forward<ValueType>(value));
   out << ";" << (rules.one_line ? " " : "\n");
 }
+
+struct PBXGroupComparator {
+  using PBXObjectPtr = std::unique_ptr<PBXObject>;
+  bool operator()(const PBXObjectPtr& lhs, const PBXObjectPtr& rhs) {
+    if (lhs->Class() != rhs->Class())
+      return rhs->Class() < lhs->Class();
+
+    if (lhs->Class() == PBXGroupClass) {
+      PBXGroup* lhs_group = static_cast<PBXGroup*>(lhs.get());
+      PBXGroup* rhs_group = static_cast<PBXGroup*>(rhs.get());
+      return lhs_group->name() < rhs_group->name();
+    }
+
+    DCHECK_EQ(lhs->Class(), PBXFileReferenceClass);
+    PBXFileReference* lhs_file = static_cast<PBXFileReference*>(lhs.get());
+    PBXFileReference* rhs_file = static_cast<PBXFileReference*>(rhs.get());
+    return lhs_file->Name() < rhs_file->Name();
+  }
+};
 }  // namespace
 
 // PBXObjectClass -------------------------------------------------------------
@@ -257,6 +290,8 @@ const char* ToString(PBXObjectClass cls) {
       return "PBXNativeTarget";
     case PBXProjectClass:
       return "PBXProject";
+    case PBXResourcesBuildPhaseClass:
+      return "PBXResourcesBuildPhase";
     case PBXShellScriptBuildPhaseClass:
       return "PBXShellScriptBuildPhase";
     case PBXSourcesBuildPhaseClass:
@@ -277,6 +312,12 @@ const char* ToString(PBXObjectClass cls) {
 PBXObjectVisitor::PBXObjectVisitor() = default;
 
 PBXObjectVisitor::~PBXObjectVisitor() = default;
+
+// PBXObjectVisitorConst ------------------------------------------------------
+
+PBXObjectVisitorConst::PBXObjectVisitorConst() = default;
+
+PBXObjectVisitorConst::~PBXObjectVisitorConst() = default;
 
 // PBXObject ------------------------------------------------------------------
 
@@ -306,11 +347,34 @@ void PBXObject::Visit(PBXObjectVisitor& visitor) {
   visitor.Visit(this);
 }
 
+void PBXObject::Visit(PBXObjectVisitorConst& visitor) const {
+  visitor.Visit(this);
+}
+
 // PBXBuildPhase --------------------------------------------------------------
 
 PBXBuildPhase::PBXBuildPhase() = default;
 
 PBXBuildPhase::~PBXBuildPhase() = default;
+
+void PBXBuildPhase::AddBuildFile(std::unique_ptr<PBXBuildFile> build_file) {
+  DCHECK(build_file);
+  files_.push_back(std::move(build_file));
+}
+
+void PBXBuildPhase::Visit(PBXObjectVisitor& visitor) {
+  PBXObject::Visit(visitor);
+  for (const auto& file : files_) {
+    file->Visit(visitor);
+  }
+}
+
+void PBXBuildPhase::Visit(PBXObjectVisitorConst& visitor) const {
+  PBXObject::Visit(visitor);
+  for (const auto& file : files_) {
+    file->Visit(visitor);
+  }
+}
 
 // PBXTarget ------------------------------------------------------------------
 
@@ -318,7 +382,8 @@ PBXTarget::PBXTarget(const std::string& name,
                      const std::string& shell_script,
                      const std::string& config_name,
                      const PBXAttributes& attributes)
-    : configurations_(new XCConfigurationList(config_name, attributes, this)),
+    : configurations_(
+          std::make_unique<XCConfigurationList>(config_name, attributes, this)),
       name_(name) {
   if (!shell_script.empty()) {
     build_phases_.push_back(
@@ -338,6 +403,15 @@ std::string PBXTarget::Name() const {
 }
 
 void PBXTarget::Visit(PBXObjectVisitor& visitor) {
+  PBXObject::Visit(visitor);
+  configurations_->Visit(visitor);
+  for (const auto& dependency : dependencies_)
+    dependency->Visit(visitor);
+  for (const auto& build_phase : build_phases_)
+    build_phase->Visit(visitor);
+}
+
+void PBXTarget::Visit(PBXObjectVisitorConst& visitor) const {
   PBXObject::Visit(visitor);
   configurations_->Visit(visitor);
   for (const auto& dependency : dependencies_)
@@ -376,11 +450,8 @@ void PBXAggregateTarget::Print(std::ostream& out, unsigned indent) const {
 // PBXBuildFile ---------------------------------------------------------------
 
 PBXBuildFile::PBXBuildFile(const PBXFileReference* file_reference,
-                           const PBXSourcesBuildPhase* build_phase,
-                           const CompilerFlags compiler_flag)
-    : file_reference_(file_reference),
-      build_phase_(build_phase),
-      compiler_flag_(compiler_flag) {
+                           const PBXBuildPhase* build_phase)
+    : file_reference_(file_reference), build_phase_(build_phase) {
   DCHECK(file_reference_);
   DCHECK(build_phase_);
 }
@@ -401,12 +472,6 @@ void PBXBuildFile::Print(std::ostream& out, unsigned indent) const {
   out << indent_str << Reference() << " = {";
   PrintProperty(out, rules, "isa", ToString(Class()));
   PrintProperty(out, rules, "fileRef", file_reference_);
-  if (compiler_flag_ == CompilerFlags::HELP) {
-    std::map<std::string, std::string> settings = {
-        {"COMPILER_FLAGS", "--help"},
-    };
-    PrintProperty(out, rules, "settings", settings);
-  }
   out << "};\n";
 }
 
@@ -421,22 +486,18 @@ PBXObjectClass PBXContainerItemProxy::Class() const {
   return PBXContainerItemProxyClass;
 }
 
-void PBXContainerItemProxy::Visit(PBXObjectVisitor& visitor) {
-  PBXObject::Visit(visitor);
-}
-
 std::string PBXContainerItemProxy::Name() const {
   return "PBXContainerItemProxy";
 }
 
 void PBXContainerItemProxy::Print(std::ostream& out, unsigned indent) const {
   const std::string indent_str(indent, '\t');
-  const IndentRules rules = {true, 0};
-  out << indent_str << Reference() << " = {";
+  const IndentRules rules = {false, indent + 1};
+  out << indent_str << Reference() << " = {\n";
   PrintProperty(out, rules, "isa", ToString(Class()));
   PrintProperty(out, rules, "containerPortal", project_);
   PrintProperty(out, rules, "proxyType", 1u);
-  PrintProperty(out, rules, "remoteGlobalIDString", target_);
+  PrintProperty(out, rules, "remoteGlobalIDString", NoReference(target_));
   PrintProperty(out, rules, "remoteInfo", target_->Name());
   out << indent_str << "};\n";
 }
@@ -458,6 +519,10 @@ std::string PBXFileReference::Name() const {
   return name_;
 }
 
+std::string PBXFileReference::Comment() const {
+  return !name_.empty() ? name_ : path_;
+}
+
 void PBXFileReference::Print(std::ostream& out, unsigned indent) const {
   const std::string indent_str(indent, '\t');
   const IndentRules rules = {true, 0};
@@ -475,7 +540,7 @@ void PBXFileReference::Print(std::ostream& out, unsigned indent) const {
       PrintProperty(out, rules, "lastKnownFileType", GetSourceType(ext));
   }
 
-  if (!name_.empty())
+  if (!name_.empty() && name_ != path_)
     PrintProperty(out, rules, "name", name_);
 
   DCHECK(!path_.empty());
@@ -505,7 +570,7 @@ void PBXFrameworksBuildPhase::Print(std::ostream& out, unsigned indent) const {
   out << indent_str << Reference() << " = {\n";
   PrintProperty(out, rules, "isa", ToString(Class()));
   PrintProperty(out, rules, "buildActionMask", 0x7fffffffu);
-  PrintProperty(out, rules, "files", EmptyPBXObjectVector());
+  PrintProperty(out, rules, "files", files_);
   PrintProperty(out, rules, "runOnlyForDeploymentPostprocessing", 0u);
   out << indent_str << "};\n";
 }
@@ -516,12 +581,6 @@ PBXGroup::PBXGroup(const std::string& path, const std::string& name)
     : name_(name), path_(path) {}
 
 PBXGroup::~PBXGroup() = default;
-
-PBXObject* PBXGroup::AddChild(std::unique_ptr<PBXObject> child) {
-  DCHECK(child);
-  children_.push_back(std::move(child));
-  return children_.back().get();
-}
 
 PBXFileReference* PBXGroup::AddSourceFile(const std::string& navigator_path,
                                           const std::string& source_path) {
@@ -542,9 +601,8 @@ PBXFileReference* PBXGroup::AddSourceFile(const std::string& navigator_path,
       }
     }
 
-    children_.push_back(std::make_unique<PBXFileReference>(
-        navigator_path, source_path, std::string()));
-    return static_cast<PBXFileReference*>(children_.back().get());
+    return CreateChild<PBXFileReference>(navigator_path, source_path,
+                                         std::string());
   }
 
   PBXGroup* group = nullptr;
@@ -561,9 +619,8 @@ PBXFileReference* PBXGroup::AddSourceFile(const std::string& navigator_path,
   }
 
   if (!group) {
-    children_.push_back(std::make_unique<PBXGroup>(std::string(component),
-                                                   std::string(component)));
-    group = static_cast<PBXGroup*>(children_.back().get());
+    group =
+        CreateChild<PBXGroup>(std::string(component), std::string(component));
   }
 
   DCHECK(group);
@@ -590,6 +647,13 @@ void PBXGroup::Visit(PBXObjectVisitor& visitor) {
   }
 }
 
+void PBXGroup::Visit(PBXObjectVisitorConst& visitor) const {
+  PBXObject::Visit(visitor);
+  for (const auto& child : children_) {
+    child->Visit(visitor);
+  }
+}
+
 void PBXGroup::Print(std::ostream& out, unsigned indent) const {
   const std::string indent_str(indent, '\t');
   const IndentRules rules = {false, indent + 1};
@@ -602,6 +666,22 @@ void PBXGroup::Print(std::ostream& out, unsigned indent) const {
     PrintProperty(out, rules, "path", path_);
   PrintProperty(out, rules, "sourceTree", "<group>");
   out << indent_str << "};\n";
+}
+
+PBXObject* PBXGroup::AddChildImpl(std::unique_ptr<PBXObject> child) {
+  DCHECK(child);
+  DCHECK(child->Class() == PBXGroupClass ||
+         child->Class() == PBXFileReferenceClass);
+
+  PBXObject* child_ptr = child.get();
+  if (autosorted()) {
+    auto iter = std::lower_bound(children_.begin(), children_.end(), child,
+                                 PBXGroupComparator());
+    children_.insert(iter, std::move(child));
+  } else {
+    children_.push_back(std::move(child));
+  }
+  return child_ptr;
 }
 
 // PBXNativeTarget ------------------------------------------------------------
@@ -623,15 +703,24 @@ PBXNativeTarget::PBXNativeTarget(const std::string& name,
       static_cast<PBXSourcesBuildPhase*>(build_phases_.back().get());
 
   build_phases_.push_back(std::make_unique<PBXFrameworksBuildPhase>());
+  build_phases_.push_back(std::make_unique<PBXResourcesBuildPhase>());
+  resource_build_phase_ =
+      static_cast<PBXResourcesBuildPhase*>(build_phases_.back().get());
 }
 
 PBXNativeTarget::~PBXNativeTarget() = default;
 
-void PBXNativeTarget::AddFileForIndexing(const PBXFileReference* file_reference,
-                                         const CompilerFlags compiler_flag) {
+void PBXNativeTarget::AddResourceFile(const PBXFileReference* file_reference) {
   DCHECK(file_reference);
-  source_build_phase_->AddBuildFile(std::make_unique<PBXBuildFile>(
-      file_reference, source_build_phase_, compiler_flag));
+  resource_build_phase_->AddBuildFile(
+      std::make_unique<PBXBuildFile>(file_reference, resource_build_phase_));
+}
+
+void PBXNativeTarget::AddFileForIndexing(
+    const PBXFileReference* file_reference) {
+  DCHECK(file_reference);
+  source_build_phase_->AddBuildFile(
+      std::make_unique<PBXBuildFile>(file_reference, source_build_phase_));
 }
 
 PBXObjectClass PBXNativeTarget::Class() const {
@@ -661,35 +750,31 @@ PBXProject::PBXProject(const std::string& name,
                        const std::string& source_path,
                        const PBXAttributes& attributes)
     : name_(name), config_name_(config_name), target_for_indexing_(nullptr) {
-  attributes_["BuildIndependentTargetsInParallel"] = "YES";
+  main_group_ = std::make_unique<PBXGroup>();
+  main_group_->set_autosorted(false);
 
-  main_group_.reset(new PBXGroup);
-  sources_ = static_cast<PBXGroup*>(
-      main_group_->AddChild(std::make_unique<PBXGroup>(source_path, "Source")));
+  sources_ = main_group_->CreateChild<PBXGroup>(source_path, "Source");
   sources_->set_is_source(true);
-  products_ = static_cast<PBXGroup*>(main_group_->AddChild(
-      std::make_unique<PBXGroup>(std::string(), "Product")));
-  main_group_->AddChild(std::make_unique<PBXGroup>(std::string(), "Build"));
 
-  configurations_.reset(new XCConfigurationList(config_name, attributes, this));
+  products_ = main_group_->CreateChild<PBXGroup>(std::string(), "Products");
+
+  configurations_ =
+      std::make_unique<XCConfigurationList>(config_name, attributes, this);
 }
 
 PBXProject::~PBXProject() = default;
 
 void PBXProject::AddSourceFileToIndexingTarget(
     const std::string& navigator_path,
-    const std::string& source_path,
-    const CompilerFlags compiler_flag) {
+    const std::string& source_path) {
   if (!target_for_indexing_) {
     AddIndexingTarget();
   }
-  AddSourceFile(navigator_path, source_path, compiler_flag,
-                target_for_indexing_);
+  AddSourceFile(navigator_path, source_path, target_for_indexing_);
 }
 
 void PBXProject::AddSourceFile(const std::string& navigator_path,
                                const std::string& source_path,
-                               const CompilerFlags compiler_flag,
                                PBXNativeTarget* target) {
   PBXFileReference* file_reference =
       sources_->AddSourceFile(navigator_path, source_path);
@@ -698,12 +783,13 @@ void PBXProject::AddSourceFile(const std::string& navigator_path,
     return;
 
   DCHECK(target);
-  target->AddFileForIndexing(file_reference, compiler_flag);
+  target->AddFileForIndexing(file_reference);
 }
 
 void PBXProject::AddAggregateTarget(const std::string& name,
                                     const std::string& shell_script) {
   PBXAttributes attributes;
+  attributes["CLANG_ENABLE_OBJC_WEAK"] = "YES";
   attributes["CODE_SIGNING_REQUIRED"] = "NO";
   attributes["CONFIGURATION_BUILD_DIR"] = ".";
   attributes["PRODUCT_NAME"] = name;
@@ -715,13 +801,15 @@ void PBXProject::AddAggregateTarget(const std::string& name,
 void PBXProject::AddIndexingTarget() {
   DCHECK(!target_for_indexing_);
   PBXAttributes attributes;
+  attributes["CLANG_ENABLE_OBJC_WEAK"] = "YES";
+  attributes["CODE_SIGNING_REQUIRED"] = "NO";
   attributes["EXECUTABLE_PREFIX"] = "";
   attributes["HEADER_SEARCH_PATHS"] = sources_->path();
   attributes["PRODUCT_NAME"] = "sources";
 
-  PBXFileReference* product_reference = static_cast<PBXFileReference*>(
-      products_->AddChild(std::make_unique<PBXFileReference>(
-          std::string(), "sources", "compiled.mach-o.executable")));
+  PBXFileReference* product_reference =
+      products_->CreateChild<PBXFileReference>(std::string(), "sources",
+                                               "compiled.mach-o.executable");
 
   const char product_type[] = "com.apple.product-type.tool";
   targets_.push_back(std::make_unique<PBXNativeTarget>(
@@ -735,13 +823,12 @@ PBXNativeTarget* PBXProject::AddNativeTarget(
     const std::string& type,
     const std::string& output_name,
     const std::string& output_type,
+    const std::string& output_dir,
     const std::string& shell_script,
     const PBXAttributes& extra_attributes) {
   std::string_view ext = FindExtension(&output_name);
-  PBXFileReference* product = static_cast<PBXFileReference*>(
-      products_->AddChild(std::make_unique<PBXFileReference>(
-          std::string(), output_name,
-          type.empty() ? GetSourceType(ext) : type)));
+  PBXFileReference* product = products_->CreateChild<PBXFileReference>(
+      std::string(), output_name, type.empty() ? GetSourceType(ext) : type);
 
   // Per Xcode build settings documentation: Product Name (PRODUCT_NAME) should
   // the basename of the product generated by the target.
@@ -757,9 +844,11 @@ PBXNativeTarget* PBXProject::AddNativeTarget(
                                  : output_basename;
 
   PBXAttributes attributes = extra_attributes;
+  attributes["CLANG_ENABLE_OBJC_WEAK"] = "YES";
   attributes["CODE_SIGNING_REQUIRED"] = "NO";
-  attributes["CONFIGURATION_BUILD_DIR"] = ".";
+  attributes["CONFIGURATION_BUILD_DIR"] = output_dir;
   attributes["PRODUCT_NAME"] = product_name;
+  attributes["EXCLUDED_SOURCE_FILE_NAMES"] = "*.*";
 
   targets_.push_back(std::make_unique<PBXNativeTarget>(
       name, shell_script, config_name_, attributes, output_type, product_name,
@@ -803,6 +892,14 @@ void PBXProject::Visit(PBXObjectVisitor& visitor) {
   }
 }
 
+void PBXProject::Visit(PBXObjectVisitorConst& visitor) const {
+  PBXObject::Visit(visitor);
+  configurations_->Visit(visitor);
+  main_group_->Visit(visitor);
+  for (const auto& target : targets_) {
+    target->Visit(visitor);
+  }
+}
 void PBXProject::Print(std::ostream& out, unsigned indent) const {
   const std::string indent_str(indent, '\t');
   const IndentRules rules = {false, indent + 1};
@@ -811,13 +908,39 @@ void PBXProject::Print(std::ostream& out, unsigned indent) const {
   PrintProperty(out, rules, "attributes", attributes_);
   PrintProperty(out, rules, "buildConfigurationList", configurations_);
   PrintProperty(out, rules, "compatibilityVersion", "Xcode 3.2");
-  PrintProperty(out, rules, "developmentRegion", "English");
+  PrintProperty(out, rules, "developmentRegion", "en");
   PrintProperty(out, rules, "hasScannedForEncodings", 1u);
-  PrintProperty(out, rules, "knownRegions", std::vector<std::string>({"en"}));
+  PrintProperty(out, rules, "knownRegions",
+                std::vector<std::string>({"en", "Base"}));
   PrintProperty(out, rules, "mainGroup", main_group_);
   PrintProperty(out, rules, "projectDirPath", project_dir_path_);
   PrintProperty(out, rules, "projectRoot", project_root_);
   PrintProperty(out, rules, "targets", targets_);
+  out << indent_str << "};\n";
+}
+
+// PBXResourcesBuildPhase -----------------------------------------------------
+
+PBXResourcesBuildPhase::PBXResourcesBuildPhase() = default;
+
+PBXResourcesBuildPhase::~PBXResourcesBuildPhase() = default;
+
+PBXObjectClass PBXResourcesBuildPhase::Class() const {
+  return PBXResourcesBuildPhaseClass;
+}
+
+std::string PBXResourcesBuildPhase::Name() const {
+  return "Resources";
+}
+
+void PBXResourcesBuildPhase::Print(std::ostream& out, unsigned indent) const {
+  const std::string indent_str(indent, '\t');
+  const IndentRules rules = {false, indent + 1};
+  out << indent_str << Reference() << " = {\n";
+  PrintProperty(out, rules, "isa", ToString(Class()));
+  PrintProperty(out, rules, "buildActionMask", 0x7fffffffu);
+  PrintProperty(out, rules, "files", files_);
+  PrintProperty(out, rules, "runOnlyForDeploymentPostprocessing", 0u);
   out << indent_str << "};\n";
 }
 
@@ -845,7 +968,7 @@ void PBXShellScriptBuildPhase::Print(std::ostream& out, unsigned indent) const {
   out << indent_str << Reference() << " = {\n";
   PrintProperty(out, rules, "isa", ToString(Class()));
   PrintProperty(out, rules, "buildActionMask", 0x7fffffffu);
-  PrintProperty(out, rules, "files", EmptyPBXObjectVector());
+  PrintProperty(out, rules, "files", files_);
   PrintProperty(out, rules, "inputPaths", EmptyPBXObjectVector());
   PrintProperty(out, rules, "name", name_);
   PrintProperty(out, rules, "outputPaths", EmptyPBXObjectVector());
@@ -862,24 +985,12 @@ PBXSourcesBuildPhase::PBXSourcesBuildPhase() = default;
 
 PBXSourcesBuildPhase::~PBXSourcesBuildPhase() = default;
 
-void PBXSourcesBuildPhase::AddBuildFile(
-    std::unique_ptr<PBXBuildFile> build_file) {
-  files_.push_back(std::move(build_file));
-}
-
 PBXObjectClass PBXSourcesBuildPhase::Class() const {
   return PBXSourcesBuildPhaseClass;
 }
 
 std::string PBXSourcesBuildPhase::Name() const {
   return "Sources";
-}
-
-void PBXSourcesBuildPhase::Visit(PBXObjectVisitor& visitor) {
-  PBXBuildPhase::Visit(visitor);
-  for (const auto& file : files_) {
-    file->Visit(visitor);
-  }
 }
 
 void PBXSourcesBuildPhase::Print(std::ostream& out, unsigned indent) const {
@@ -903,13 +1014,21 @@ PBXTargetDependency::~PBXTargetDependency() = default;
 PBXObjectClass PBXTargetDependency::Class() const {
   return PBXTargetDependencyClass;
 }
+
 std::string PBXTargetDependency::Name() const {
   return "PBXTargetDependency";
 }
+
 void PBXTargetDependency::Visit(PBXObjectVisitor& visitor) {
   PBXObject::Visit(visitor);
   container_item_proxy_->Visit(visitor);
 }
+
+void PBXTargetDependency::Visit(PBXObjectVisitorConst& visitor) const {
+  PBXObject::Visit(visitor);
+  container_item_proxy_->Visit(visitor);
+}
+
 void PBXTargetDependency::Print(std::ostream& out, unsigned indent) const {
   const std::string indent_str(indent, '\t');
   const IndentRules rules = {false, indent + 1};
@@ -972,6 +1091,13 @@ std::string XCConfigurationList::Name() const {
 }
 
 void XCConfigurationList::Visit(PBXObjectVisitor& visitor) {
+  PBXObject::Visit(visitor);
+  for (const auto& configuration : configurations_) {
+    configuration->Visit(visitor);
+  }
+}
+
+void XCConfigurationList::Visit(PBXObjectVisitorConst& visitor) const {
   PBXObject::Visit(visitor);
   for (const auto& configuration : configurations_) {
     configuration->Visit(visitor);

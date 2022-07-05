@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "gn/ninja_target_writer.h"
 
 class OutputFile;
@@ -51,12 +50,17 @@ class NinjaActionTargetWriter : public NinjaTargetWriter {
 
   void WriteDepfile(const SourceFile& source);
 
+  // Writes variables that we make available to all actions, irrespective
+  // of whether they're associated with a specific source file.
+  void WriteNinjaVariablesForAction();
+
   // Path output writer that doesn't do any escaping or quoting. It does,
   // however, convert slashes.  Used for
   // computing intermediate strings.
   PathOutput path_output_no_escaping_;
 
-  DISALLOW_COPY_AND_ASSIGN(NinjaActionTargetWriter);
+  NinjaActionTargetWriter(const NinjaActionTargetWriter&) = delete;
+  NinjaActionTargetWriter& operator=(const NinjaActionTargetWriter&) = delete;
 };
 
 #endif  // TOOLS_GN_NINJA_ACTION_TARGET_WRITER_H_

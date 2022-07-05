@@ -231,6 +231,17 @@ void TestWithScope::SetupToolchain(Toolchain* toolchain, bool use_toc) {
       "{{root_out_dir}}/{{crate_name}}{{output_extension}}"));
   toolchain->SetTool(std::move(rustc_tool));
 
+  // SWIFT
+  std::unique_ptr<Tool> swift_tool = Tool::CreateTool(CTool::kCToolSwift);
+  SetCommandForTool(
+      "swiftc --module-name {{module_name}} {{module_dirs}} {{inputs}}",
+      swift_tool.get());
+  swift_tool->set_outputs(SubstitutionList::MakeForTest(
+      "{{target_out_dir}}/{{module_name}}.swiftmodule"));
+  swift_tool->set_partial_outputs(SubstitutionList::MakeForTest(
+      "{{target_out_dir}}/{{source_name_part}}.o"));
+  toolchain->SetTool(std::move(swift_tool));
+
   // CDYLIB
   std::unique_ptr<Tool> cdylib_tool = Tool::CreateTool(RustTool::kRsToolCDylib);
   SetCommandForTool(
@@ -241,7 +252,7 @@ void TestWithScope::SetupToolchain(Toolchain* toolchain, bool use_toc) {
   cdylib_tool->set_output_prefix("lib");
   cdylib_tool->set_default_output_extension(".so");
   cdylib_tool->set_outputs(SubstitutionList::MakeForTest(
-      "{{root_output_dir}}/{{target_output_name}}{{output_extension}}"));
+      "{{target_out_dir}}/{{target_output_name}}{{output_extension}}"));
   toolchain->SetTool(std::move(cdylib_tool));
 
   // DYLIB
@@ -254,7 +265,7 @@ void TestWithScope::SetupToolchain(Toolchain* toolchain, bool use_toc) {
   dylib_tool->set_output_prefix("lib");
   dylib_tool->set_default_output_extension(".so");
   dylib_tool->set_outputs(SubstitutionList::MakeForTest(
-      "{{root_output_dir}}/{{target_output_name}}{{output_extension}}"));
+      "{{target_out_dir}}/{{target_output_name}}{{output_extension}}"));
   toolchain->SetTool(std::move(dylib_tool));
 
   // RUST_PROC_MACRO

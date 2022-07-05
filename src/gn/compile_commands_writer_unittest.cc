@@ -54,9 +54,8 @@ TEST_F(CompileCommandsTest, SourceSet) {
 
   // Source set itself.
   {
-    std::string out;
     CompileCommandsWriter writer;
-    writer.RenderJSON(build_settings(), targets, &out);
+    std::string out = writer.RenderJSON(build_settings(), targets);
 
 #if defined(OS_WIN)
     const char expected[] =
@@ -104,9 +103,8 @@ TEST_F(CompileCommandsTest, SourceSet) {
   targets.push_back(&shlib_target);
 
   {
-    std::string out;
     CompileCommandsWriter writer;
-    writer.RenderJSON(build_settings(), targets, &out);
+    std::string out = writer.RenderJSON(build_settings(), targets);
 
 #if defined(OS_WIN)
     const char expected[] =
@@ -166,9 +164,8 @@ TEST_F(CompileCommandsTest, SourceSet) {
   targets.push_back(&stlib_target);
 
   {
-    std::string out;
     CompileCommandsWriter writer;
-    writer.RenderJSON(build_settings(), targets, &out);
+    std::string out = writer.RenderJSON(build_settings(), targets);
 
 #if defined(OS_WIN)
     const char expected[] =
@@ -240,15 +237,16 @@ TEST_F(CompileCommandsTest, EscapeDefines) {
   target.config_values().defines().push_back("BOOL_DEF");
   target.config_values().defines().push_back("INT_DEF=123");
   target.config_values().defines().push_back("STR_DEF=\"ABCD 1\"");
+  target.config_values().defines().push_back("INCLUDE=<header.h>");
   ASSERT_TRUE(target.OnResolved(&err));
   targets.push_back(&target);
 
-  std::string out;
   CompileCommandsWriter writer;
-  writer.RenderJSON(build_settings(), targets, &out);
+  std::string out = writer.RenderJSON(build_settings(), targets);
 
   const char expected[] =
-      "-DBOOL_DEF -DINT_DEF=123 -DSTR_DEF=\\\\\\\"ABCD\\\\ 1\\\\\\\"";
+      "-DBOOL_DEF -DINT_DEF=123 \\\"-DSTR_DEF=\\\\\\\"ABCD 1\\\\\\\"\\\" "
+      "\\\"-DINCLUDE=\\u003Cheader.h>\\\"";
   EXPECT_TRUE(out.find(expected) != std::string::npos);
 }
 
@@ -302,9 +300,8 @@ TEST_F(CompileCommandsTest, WinPrecompiledHeaders) {
     ASSERT_TRUE(no_pch_target.OnResolved(&err));
     targets.push_back(&no_pch_target);
 
-    std::string out;
     CompileCommandsWriter writer;
-    writer.RenderJSON(build_settings(), targets, &out);
+    std::string out = writer.RenderJSON(build_settings(), targets);
 
 #if defined(OS_WIN)
     const char no_pch_expected[] =
@@ -357,9 +354,8 @@ TEST_F(CompileCommandsTest, WinPrecompiledHeaders) {
     ASSERT_TRUE(pch_target.OnResolved(&err));
     targets.push_back(&pch_target);
 
-    std::string out;
     CompileCommandsWriter writer;
-    writer.RenderJSON(build_settings(), targets, &out);
+    std::string out = writer.RenderJSON(build_settings(), targets);
 
 #if defined(OS_WIN)
     const char pch_win_expected[] =
@@ -453,9 +449,8 @@ TEST_F(CompileCommandsTest, GCCPrecompiledHeaders) {
     ASSERT_TRUE(no_pch_target.OnResolved(&err));
     targets.push_back(&no_pch_target);
 
-    std::string out;
     CompileCommandsWriter writer;
-    writer.RenderJSON(build_settings(), targets, &out);
+    std::string out = writer.RenderJSON(build_settings(), targets);
 
 #if defined(OS_WIN)
     const char no_pch_expected[] =
@@ -508,9 +503,8 @@ TEST_F(CompileCommandsTest, GCCPrecompiledHeaders) {
     ASSERT_TRUE(pch_target.OnResolved(&err));
     targets.push_back(&pch_target);
 
-    std::string out;
     CompileCommandsWriter writer;
-    writer.RenderJSON(build_settings(), targets, &out);
+    std::string out = writer.RenderJSON(build_settings(), targets);
 
 #if defined(OS_WIN)
     const char pch_gcc_expected[] =
@@ -565,9 +559,8 @@ TEST_F(CompileCommandsTest, EscapedFlags) {
   ASSERT_TRUE(target.OnResolved(&err));
   targets.push_back(&target);
 
-  std::string out;
   CompileCommandsWriter writer;
-  writer.RenderJSON(build_settings(), targets, &out);
+  std::string out = writer.RenderJSON(build_settings(), targets);
 
 #if defined(OS_WIN)
   const char expected[] =

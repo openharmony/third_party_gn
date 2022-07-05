@@ -26,7 +26,7 @@ namespace commands {
 
 namespace {
 
-using TargetSet = std::set<const Target*>;
+using TargetSet = TargetSet;
 using TargetVector = std::vector<const Target*>;
 
 // Maps targets to the list of targets that depend on them.
@@ -65,10 +65,7 @@ size_t RecursivePrintTarget(const DepMap& dep_map,
 
   bool print_children = true;
   if (seen_targets) {
-    if (seen_targets->find(target) == seen_targets->end()) {
-      // New target, mark it visited.
-      seen_targets->insert(target);
-    } else {
+    if (!seen_targets->add(target)) {
       // Already seen.
       print_children = false;
       // Only print "..." if something is actually elided, which means that
@@ -112,9 +109,8 @@ void RecursiveCollectChildRefs(const DepMap& dep_map,
 void RecursiveCollectRefs(const DepMap& dep_map,
                           const Target* target,
                           TargetSet* results) {
-  if (results->find(target) != results->end())
+  if (!results->add(target))
     return;  // Already found this target.
-  results->insert(target);
   RecursiveCollectChildRefs(dep_map, target, results);
 }
 
@@ -127,63 +123,6 @@ void RecursiveCollectChildRefs(const DepMap& dep_map,
   for (DepMap::const_iterator cur_dep = dep_begin; cur_dep != dep_end;
        cur_dep++)
     RecursiveCollectRefs(dep_map, cur_dep->second, results);
-}
-
-bool TargetContainsFile(const Target* target, const SourceFile& file) {
-  for (const auto& cur_file : target->sources()) {
-    if (cur_file == file)
-      return true;
-  }
-  for (const auto& cur_file : target->public_headers()) {
-    if (cur_file == file)
-      return true;
-  }
-  for (ConfigValuesIterator iter(target); !iter.done(); iter.Next()) {
-    for (const auto& cur_file : iter.cur().inputs()) {
-      if (cur_file == file)
-        return true;
-    }
-  }
-  for (const auto& cur_file : target->data()) {
-    if (cur_file == file.value())
-      return true;
-    if (cur_file.back() == '/' &&
-        base::StartsWith(file.value(), cur_file, base::CompareCase::SENSITIVE))
-      return true;
-  }
-
-  if (target->action_values().script().value() == file.value())
-    return true;
-
-  std::vector<SourceFile> output_sources;
-  target->action_values().GetOutputsAsSourceFiles(target, &output_sources);
-  for (const auto& cur_file : output_sources) {
-    if (cur_file == file)
-      return true;
-  }
-
-  for (const auto& cur_file : target->computed_outputs()) {
-    if (cur_file.AsSourceFile(target->settings()->build_settings()) == file)
-      return true;
-  }
-  return false;
-}
-
-void GetTargetsContainingFile(Setup* setup,
-                              const std::vector<const Target*>& all_targets,
-                              const SourceFile& file,
-                              bool all_toolchains,
-                              UniqueVector<const Target*>* matches) {
-  Label default_toolchain = setup->loader()->default_toolchain_label();
-  for (auto* target : all_targets) {
-    if (!all_toolchains) {
-      // Only check targets in the default toolchain.
-      if (target->label().GetToolchainLabel() != default_toolchain)
-        continue;
-    }
-    if (TargetContainsFile(target, file))
-      matches->push_back(target);
-  }
 }
 
 bool TargetReferencesConfig(const Target* target, const Config* config) {
@@ -201,11 +140,11 @@ bool TargetReferencesConfig(const Target* target, const Config* config) {
 void GetTargetsReferencingConfig(Setup* setup,
                                  const std::vector<const Target*>& all_targets,
                                  const Config* config,
-                                 bool all_toolchains,
+                                 bool default_toolchain_only,
                                  UniqueVector<const Target*>* matches) {
   Label default_toolchain = setup->loader()->default_toolchain_label();
   for (auto* target : all_targets) {
-    if (!all_toolchains) {
+    if (default_toolchain_only) {
       // Only check targets in the default toolchain.
       if (target->label().GetToolchainLabel() != default_toolchain)
         continue;
@@ -294,8 +233,8 @@ const char kRefs_HelpShort[] = "refs: Find stuff referencing a target or file.";
 const char kRefs_Help[] =
     R"(gn refs
 
-  gn refs <out_dir> (<label_pattern>|<label>|<file>|@<response_file>)*
-          [--all] [--all-toolchains] [--as=...] [--testonly=...] [--type=...]
+  gn refs <out_dir> (<label_pattern>|<label>|<file>|@<response_file>)* [--all]
+          [--default-toolchain] [--as=...] [--testonly=...] [--type=...]
 
   Finds reverse dependencies (which targets reference something). The input is
   a list containing:
@@ -329,15 +268,17 @@ Options
       directly or indirectly on that file.
 
       When used with --tree, turns off eliding to show a complete tree.
+
 )"
 
-    ALL_TOOLCHAINS_SWITCH_HELP "\n" TARGET_PRINTING_MODE_COMMAND_LINE_HELP
+    TARGET_PRINTING_MODE_COMMAND_LINE_HELP "\n" DEFAULT_TOOLCHAIN_SWITCH_HELP
 
     R"(
   -q
      Quiet. If nothing matches, don't print any output. Without this option, if
      there are no matches there will be an informational message printed which
      might interfere with scripts processing the output.
+
 )"
 
     TARGET_TESTONLY_FILTER_COMMAND_LINE_HELP
@@ -349,6 +290,7 @@ Options
 
       Tree output can not be used with the filtering or output flags: --as,
       --type, --testonly.
+
 )"
 
     TARGET_TYPE_FILTER_COMMAND_LINE_HELP
@@ -398,7 +340,7 @@ Examples (file input)
 
 int RunRefs(const std::vector<std::string>& args) {
   if (args.size() <= 1) {
-    Err(Location(), "You're holding it wrong.",
+    Err(Location(), "Unknown command format. See \"gn help refs\"",
         "Usage: \"gn refs <out_dir> (<label_pattern>|<file>)*\"")
         .PrintToStdout();
     return 1;
@@ -407,7 +349,7 @@ int RunRefs(const std::vector<std::string>& args) {
   const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
   bool tree = cmdline->HasSwitch("tree");
   bool all = cmdline->HasSwitch("all");
-  bool all_toolchains = cmdline->HasSwitch(switches::kAllToolchains);
+  bool default_toolchain_only = cmdline->HasSwitch(switches::kDefaultToolchain);
 
   // Deliberately leaked to avoid expensive process teardown.
   Setup* setup = new Setup;
@@ -443,7 +385,7 @@ int RunRefs(const std::vector<std::string>& args) {
   UniqueVector<const Config*> config_matches;
   UniqueVector<const Toolchain*> toolchain_matches;
   UniqueVector<SourceFile> file_matches;
-  if (!ResolveFromCommandLineInput(setup, inputs, all_toolchains,
+  if (!ResolveFromCommandLineInput(setup, inputs, default_toolchain_only,
                                    &target_matches, &config_matches,
                                    &toolchain_matches, &file_matches))
     return 1;
@@ -457,11 +399,17 @@ int RunRefs(const std::vector<std::string>& args) {
       setup->builder().GetAllResolvedTargets();
   UniqueVector<const Target*> explicit_target_matches;
   for (const auto& file : file_matches) {
-    GetTargetsContainingFile(setup, all_targets, file, all_toolchains,
-                             &explicit_target_matches);
+    std::vector<TargetContainingFile> target_containing;
+    GetTargetsContainingFile(setup, all_targets, file, default_toolchain_only,
+                             &target_containing);
+
+    // Extract just the Target*.
+    for (const TargetContainingFile& pair : target_containing)
+      explicit_target_matches.push_back(pair.first);
   }
   for (auto* config : config_matches) {
-    GetTargetsReferencingConfig(setup, all_targets, config, all_toolchains,
+    GetTargetsReferencingConfig(setup, all_targets, config,
+                                default_toolchain_only,
                                 &explicit_target_matches);
   }
 

@@ -451,6 +451,7 @@ TEST(FilesystemUtils, RebasePath) {
 
   // Sharing prefix.
   EXPECT_EQ("foo", RebasePath("//a/foo", SourceDir("//a/"), source_root));
+  EXPECT_EQ("foo", RebasePath("//a/foo", SourceDir("//a"), source_root));
   EXPECT_EQ("foo/", RebasePath("//a/foo/", SourceDir("//a/"), source_root));
   EXPECT_EQ("foo", RebasePath("//a/b/foo", SourceDir("//a/b/"), source_root));
   EXPECT_EQ("foo/", RebasePath("//a/b/foo/", SourceDir("//a/b/"), source_root));
@@ -458,13 +459,12 @@ TEST(FilesystemUtils, RebasePath) {
             RebasePath("//a/b/foo/bar", SourceDir("//a/b/"), source_root));
   EXPECT_EQ("foo/bar/",
             RebasePath("//a/b/foo/bar/", SourceDir("//a/b/"), source_root));
-
-  // One could argue about this case. Since the input doesn't have a slash it
-  // would normally not be treated like a directory and we'd go up, which is
-  // simpler. However, since it matches the output directory's name, we could
-  // potentially infer that it's the same and return "." for this.
-  EXPECT_EQ("../bar",
+  EXPECT_EQ(".",
             RebasePath("//foo/bar", SourceDir("//foo/bar/"), source_root));
+  EXPECT_EQ("..",
+            RebasePath("//foo", SourceDir("//foo/bar/"), source_root));
+  EXPECT_EQ("../",
+            RebasePath("//foo/", SourceDir("//foo/bar/"), source_root));
 
   // Check when only |input| is system-absolute
   EXPECT_EQ("foo", RebasePath("/source/root/foo", SourceDir("//"),
@@ -636,43 +636,6 @@ TEST(FilesystemUtils, ContentsEqual) {
 
   // The same length, different contents.
   EXPECT_FALSE(ContentsEqual(file_path, "bar"));
-}
-
-TEST(FilesystemUtils, WriteFileIfChanged) {
-  base::ScopedTempDir temp_dir;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-
-  std::string data = "foo";
-
-  // Write if file doesn't exist. Create also directory.
-  base::FilePath file_path =
-      temp_dir.GetPath().AppendASCII("bar").AppendASCII("foo.txt");
-  EXPECT_TRUE(WriteFileIfChanged(file_path, data, nullptr));
-
-  base::File::Info file_info;
-  ASSERT_TRUE(base::GetFileInfo(file_path, &file_info));
-  Ticks last_modified = file_info.last_modified;
-
-  {
-    using namespace std::chrono_literals;
-#if defined(OS_MACOSX)
-    // Modification times are in seconds in HFS on Mac.
-    std::this_thread::sleep_for(1s);
-#else
-    std::this_thread::sleep_for(1ms);
-#endif
-  }
-
-  // Don't write if contents is the same.
-  EXPECT_TRUE(WriteFileIfChanged(file_path, data, nullptr));
-  ASSERT_TRUE(base::GetFileInfo(file_path, &file_info));
-  EXPECT_EQ(last_modified, file_info.last_modified);
-
-  // Write if contents changed.
-  EXPECT_TRUE(WriteFileIfChanged(file_path, "bar", nullptr));
-  std::string file_data;
-  ASSERT_TRUE(base::ReadFileToString(file_path, &file_data));
-  EXPECT_EQ("bar", file_data);
 }
 
 TEST(FilesystemUtils, GetToolchainDirs) {

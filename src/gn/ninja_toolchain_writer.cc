@@ -9,6 +9,7 @@
 #include "base/files/file_util.h"
 #include "base/strings/stringize_macros.h"
 #include "gn/build_settings.h"
+#include "gn/builtin_tool.h"
 #include "gn/c_tool.h"
 #include "gn/filesystem_utils.h"
 #include "gn/general_tool.h"
@@ -43,8 +44,10 @@ void NinjaToolchainWriter::Run(
   std::string rule_prefix = GetNinjaRulePrefixForToolchain(settings_);
 
   for (const auto& tool : toolchain_->tools()) {
-    if (tool.second->name() == GeneralTool::kGeneralToolAction)
+    if (tool.second->name() == GeneralTool::kGeneralToolAction ||
+        tool.second->AsBuiltin()) {
       continue;
+    }
     WriteToolRule(tool.second.get(), rule_prefix);
   }
   out_ << std::endl;
@@ -83,7 +86,8 @@ void NinjaToolchainWriter::WriteToolRule(Tool* tool,
   EscapeOptions options;
   options.mode = ESCAPE_NINJA_PREFORMATTED_COMMAND;
 
-  WriteCommandRulePattern("command", tool->command_launcher(), tool->command(), options);
+  WriteCommandRulePattern("command", tool->command_launcher(), tool->command(),
+                          options);
 
   WriteRulePattern("description", tool->description(), options);
   WriteRulePattern("rspfile", tool->rspfile(), options);
@@ -92,7 +96,7 @@ void NinjaToolchainWriter::WriteToolRule(Tool* tool,
   if (CTool* c_tool = tool->AsC()) {
     if (c_tool->depsformat() == CTool::DEPS_GCC) {
       // GCC-style deps require a depfile.
-      if (!tool->depfile().empty()) {
+      if (!c_tool->depfile().empty()) {
         WriteRulePattern("depfile", tool->depfile(), options);
         out_ << kIndent << "deps = gcc" << std::endl;
       }
@@ -132,8 +136,6 @@ void NinjaToolchainWriter::WriteCommandRulePattern(
     const SubstitutionPattern& command,
     const EscapeOptions& options) {
   CHECK(!command.empty()) << "Command should not be empty";
-  if (command.empty())
-    return;
   out_ << kIndent << name << " = " ;
   if (!launcher.empty())
     out_ << launcher << " ";

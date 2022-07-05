@@ -6,7 +6,6 @@
 
 #include <iterator>
 
-#include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "gn/filesystem_utils.h"
 #include "gn/general_tool.h"
@@ -259,6 +258,20 @@ void NinjaCreateBundleTargetWriter::WriteCompileAssetsCatalogStep(
   if (partial_info_plist != OutputFile()) {
     out_ << "  partial_info_plist = ";
     path_output_.WriteFile(out_, partial_info_plist);
+    out_ << std::endl;
+  }
+
+  const std::vector<SubstitutionPattern>& flags =
+      target_->bundle_data().xcasset_compiler_flags().list();
+  if (!flags.empty()) {
+    out_ << "  " << SubstitutionXcassetsCompilerFlags.ninja_name << " =";
+    EscapeOptions args_escape_options;
+    args_escape_options.mode = ESCAPE_NINJA_COMMAND;
+    for (const auto& flag : flags) {
+      out_ << " ";
+      SubstitutionWriter::WriteWithNinjaVariables(flag, args_escape_options,
+                                                  out_);
+    }
     out_ << std::endl;
   }
 }

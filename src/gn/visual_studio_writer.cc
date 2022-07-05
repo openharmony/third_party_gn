@@ -25,6 +25,7 @@
 #include "gn/parse_tree.h"
 #include "gn/path_output.h"
 #include "gn/standard_out.h"
+#include "gn/string_output_buffer.h"
 #include "gn/target.h"
 #include "gn/variables.h"
 #include "gn/visual_studio_utils.h"
@@ -72,16 +73,19 @@ const char kToolsetVersionVs2013[] = "v120";               // Visual Studio 2013
 const char kToolsetVersionVs2015[] = "v140";               // Visual Studio 2015
 const char kToolsetVersionVs2017[] = "v141";               // Visual Studio 2017
 const char kToolsetVersionVs2019[] = "v142";               // Visual Studio 2019
+const char kToolsetVersionVs2022[] = "v143";               // Visual Studio 2022
 const char kProjectVersionVs2013[] = "12.0";               // Visual Studio 2013
 const char kProjectVersionVs2015[] = "14.0";               // Visual Studio 2015
 const char kProjectVersionVs2017[] = "15.0";               // Visual Studio 2017
 const char kProjectVersionVs2019[] = "16.0";               // Visual Studio 2019
+const char kProjectVersionVs2022[] = "17.0";               // Visual Studio 2022
 const char kVersionStringVs2013[] = "Visual Studio 2013";  // Visual Studio 2013
 const char kVersionStringVs2015[] = "Visual Studio 2015";  // Visual Studio 2015
 const char kVersionStringVs2017[] = "Visual Studio 2017";  // Visual Studio 2017
 const char kVersionStringVs2019[] = "Visual Studio 2019";  // Visual Studio 2019
+const char kVersionStringVs2022[] = "Visual Studio 2022";  // Visual Studio 2022
 const char kWindowsKitsVersion[] = "10";                   // Windows 10 SDK
-const char kWindowsKitsDefaultVersion[] = "10.0.17134.0";  // Windows 10 SDK
+const char kWindowsKitsDefaultVersion[] = "10";            // Windows 10 SDK
 
 const char kGuidTypeProject[] = "{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}";
 const char kGuidTypeFolder[] = "{2150E333-8FDC-42A3-9474-1A3956D46DE8}";
@@ -240,6 +244,10 @@ bool UnicodeTarget(const Target* target) {
   return true;
 }
 
+std::string GetNinjaExecutable(const std::string& ninja_executable) {
+  return ninja_executable.empty() ? "ninja.exe" : ninja_executable;
+}
+
 }  // namespace
 
 VisualStudioWriter::SolutionEntry::SolutionEntry(const std::string& _name,
@@ -306,8 +314,11 @@ VisualStudioWriter::VisualStudioWriter(const BuildSettings* build_settings,
       toolset_version_ = kToolsetVersionVs2019;
       version_string_ = kVersionStringVs2019;
       break;
-    default:
-      NOTREACHED() << "Not a valid Visual Studio Version: " << version;
+    case Version::Vs2022:
+      project_version_ = kProjectVersionVs2022;
+      toolset_version_ = kToolsetVersionVs2022;
+      version_string_ = kVersionStringVs2022;
+      break;
   }
 
   windows_kits_include_dirs_ = GetWindowsKitsIncludeDirs(win_kit);
@@ -323,6 +334,7 @@ bool VisualStudioWriter::RunAndWriteFiles(const BuildSettings* build_settings,
                                           const std::string& filters,
                                           const std::string& win_sdk,
                                           const std::string& ninja_extra_args,
+                                          const std::string& ninja_executable,
                                           bool no_deps,
                                           Err* err) {
   std::vector<const Target*> targets;
@@ -351,14 +363,17 @@ bool VisualStudioWriter::RunAndWriteFiles(const BuildSettings* build_settings,
 
   for (const Target* target : targets) {
     // Skip actions and bundle targets.
-    if (target->output_type() == Target::COPY_FILES ||
-        target->output_type() == Target::ACTION ||
+    if (target->output_type() == Target::ACTION ||
         target->output_type() == Target::ACTION_FOREACH ||
-        target->output_type() == Target::BUNDLE_DATA) {
+        target->output_type() == Target::BUNDLE_DATA ||
+        target->output_type() == Target::COPY_FILES ||
+        target->output_type() == Target::CREATE_BUNDLE ||
+        target->output_type() == Target::GENERATED_FILE) {
       continue;
     }
 
-    if (!writer.WriteProjectFiles(target, ninja_extra_args, err))
+    if (!writer.WriteProjectFiles(target, ninja_extra_args, ninja_executable,
+                                  err))
       return false;
   }
 
@@ -381,6 +396,7 @@ bool VisualStudioWriter::RunAndWriteFiles(const BuildSettings* build_settings,
 
 bool VisualStudioWriter::WriteProjectFiles(const Target* target,
                                            const std::string& ninja_extra_args,
+                                           const std::string& ninja_executable,
                                            Err* err) {
   std::string project_name = target->label().name();
   const char* project_config_platform = config_platform_;
@@ -409,10 +425,12 @@ bool VisualStudioWriter::WriteProjectFiles(const Target* target,
       FilePathToUTF8(build_settings_->GetFullPath(target->label().dir())),
       project_config_platform));
 
-  std::stringstream vcxproj_string_out;
+  StringOutputBuffer vcxproj_storage;
+  std::ostream vcxproj_string_out(&vcxproj_storage);
   SourceFileCompileTypePairs source_types;
   if (!WriteProjectFileContents(vcxproj_string_out, *projects_.back(), target,
-                                ninja_extra_args, &source_types, err)) {
+                                ninja_extra_args, ninja_executable,
+                                &source_types, err)) {
     projects_.pop_back();
     return false;
   }
@@ -420,13 +438,15 @@ bool VisualStudioWriter::WriteProjectFiles(const Target* target,
   // Only write the content to the file if it's different. That is
   // both a performance optimization and more importantly, prevents
   // Visual Studio from reloading the projects.
-  if (!WriteFileIfChanged(vcxproj_path, vcxproj_string_out.str(), err))
+  if (!vcxproj_storage.WriteToFileIfChanged(vcxproj_path, err))
     return false;
 
   base::FilePath filters_path = UTF8ToFilePath(vcxproj_path_str + ".filters");
-  std::stringstream filters_string_out;
+
+  StringOutputBuffer filters_storage;
+  std::ostream filters_string_out(&filters_storage);
   WriteFiltersFileContents(filters_string_out, target, source_types);
-  return WriteFileIfChanged(filters_path, filters_string_out.str(), err);
+  return filters_storage.WriteToFileIfChanged(filters_path, err);
 }
 
 bool VisualStudioWriter::WriteProjectFileContents(
@@ -434,6 +454,7 @@ bool VisualStudioWriter::WriteProjectFileContents(
     const SolutionProject& solution_project,
     const Target* target,
     const std::string& ninja_extra_args,
+    const std::string& ninja_executable,
     SourceFileCompileTypePairs* source_types,
     Err* err) {
   PathOutput path_output(
@@ -520,6 +541,7 @@ bool VisualStudioWriter::WriteProjectFileContents(
   project.SubElement("PropertyGroup", XmlAttributes("Label", "UserMacros"));
 
   std::string ninja_target = GetNinjaTarget(target);
+  std::string ninja_exe = GetNinjaExecutable(ninja_executable);
 
   {
     std::unique_ptr<XmlElementWriter> properties =
@@ -541,8 +563,8 @@ bool VisualStudioWriter::WriteProjectFileContents(
         std::unique_ptr<XmlElementWriter> include_dirs =
             cl_compile->SubElement("AdditionalIncludeDirectories");
         RecursiveTargetConfigToStream<SourceDir>(
-            target, &ConfigValues::include_dirs, IncludeDirWriter(path_output),
-            include_dirs->StartContent(false));
+            kRecursiveWriterSkipDuplicates, target, &ConfigValues::include_dirs,
+            IncludeDirWriter(path_output), include_dirs->StartContent(false));
         include_dirs->Text(windows_kits_include_dirs_ +
                            "$(VSInstallDir)\\VC\\atlmfc\\include;" +
                            "%(AdditionalIncludeDirectories)");
@@ -577,7 +599,8 @@ bool VisualStudioWriter::WriteProjectFileContents(
         std::unique_ptr<XmlElementWriter> preprocessor_definitions =
             cl_compile->SubElement("PreprocessorDefinitions");
         RecursiveTargetConfigToStream<std::string>(
-            target, &ConfigValues::defines, SemicolonSeparatedWriter(),
+            kRecursiveWriterSkipDuplicates, target, &ConfigValues::defines,
+            SemicolonSeparatedWriter(),
             preprocessor_definitions->StartContent(false));
         preprocessor_definitions->Text("%(PreprocessorDefinitions)");
       }
@@ -615,9 +638,9 @@ bool VisualStudioWriter::WriteProjectFileContents(
         compile_type = "CustomBuild";
         std::unique_ptr<XmlElementWriter> build = group->SubElement(
             compile_type, "Include", SourceFileWriter(path_output, file));
-        build->SubElement("Command")->Text("call ninja.exe -C $(OutDir) " +
-                                           ninja_extra_args + " " +
-                                           tool_outputs[0].value());
+        build->SubElement("Command")->Text("call " + ninja_exe +
+                                           " -C $(OutDir) " + ninja_extra_args +
+                                           " " + tool_outputs[0].value());
         build->SubElement("Outputs")->Text("$(OutDir)" +
                                            tool_outputs[0].value());
       } else {
@@ -643,7 +666,7 @@ bool VisualStudioWriter::WriteProjectFileContents(
         project.SubElement("Target", XmlAttributes("Name", "Build"));
     build->SubElement(
         "Exec",
-        XmlAttributes("Command", "call ninja.exe -C $(OutDir) " +
+        XmlAttributes("Command", "call " + ninja_exe + " -C $(OutDir) " +
                                      ninja_extra_args + " " + ninja_target));
   }
 
@@ -653,7 +676,8 @@ bool VisualStudioWriter::WriteProjectFileContents(
     clean->SubElement(
         "Exec",
         XmlAttributes("Command",
-                      "call ninja.exe -C $(OutDir) -tclean " + ninja_target));
+                      "call " + ninja_exe + " -C $(OutDir) -tclean " +
+                      ninja_target));
   }
 
   return true;
@@ -730,13 +754,14 @@ bool VisualStudioWriter::WriteSolutionFile(const std::string& sln_name,
 
   base::FilePath sln_path = build_settings_->GetFullPath(sln_file);
 
-  std::stringstream string_out;
+  StringOutputBuffer storage;
+  std::ostream string_out(&storage);
   WriteSolutionFileContents(string_out, sln_path.DirName());
 
   // Only write the content to the file if it's different. That is
   // both a performance optimization and more importantly, prevents
   // Visual Studio from reloading the projects.
-  return WriteFileIfChanged(sln_path, string_out.str(), err);
+  return storage.WriteToFileIfChanged(sln_path, err);
 }
 
 void VisualStudioWriter::WriteSolutionFileContents(

@@ -26,16 +26,17 @@ class CompileCommandsWriter {
                                const std::string& target_filters,
                                bool quiet,
                                Err* err);
-  static void RenderJSON(const BuildSettings* build_settings,
-                         std::vector<const Target*>& all_targets,
-                         std::string* compile_commands);
+
+  static std::string RenderJSON(const BuildSettings* build_settings,
+                                std::vector<const Target*>& all_targets);
+
   static std::vector<const Target*> FilterTargets(
       const std::vector<const Target*>& all_targets,
       const std::set<std::string>& target_filters_set);
 
  private:
-  // This fuction visits the deps graph of a target in a DFS fashion.
-  static void VisitDeps(const Target* target, std::set<const Target*>* visited);
+  // This function visits the deps graph of a target in a DFS fashion.
+  static void VisitDeps(const Target* target, TargetSet* visited);
 };
 
 #endif  // TOOLS_GN_COMPILE_COMMANDS_WRITER_H_

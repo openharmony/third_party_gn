@@ -311,7 +311,7 @@ const Value* Value::FindPath(
 
 const Value* Value::FindPath(span<const std::string_view> path) const {
   const Value* cur = this;
-  for (const std::string_view component : path) {
+  for (const std::string_view& component : path) {
     if (!cur->is_dict() || (cur = cur->FindKey(component)) == nullptr)
       return nullptr;
   }
@@ -654,7 +654,7 @@ std::unique_ptr<DictionaryValue> DictionaryValue::From(
     std::unique_ptr<Value> value) {
   DictionaryValue* out;
   if (value && value->GetAsDictionary(&out)) {
-    ignore_result(value.release());
+    [[maybe_unused]] auto released = value.release();
     return WrapUnique(out);
   }
   return nullptr;
@@ -1078,7 +1078,7 @@ std::unique_ptr<DictionaryValue> DictionaryValue::CreateDeepCopy() const {
 std::unique_ptr<ListValue> ListValue::From(std::unique_ptr<Value> value) {
   ListValue* out;
   if (value && value->GetAsList(&out)) {
-    ignore_result(value.release());
+    [[maybe_unused]] auto result = value.release();
     return WrapUnique(out);
   }
   return nullptr;

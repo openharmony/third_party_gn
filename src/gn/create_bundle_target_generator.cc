@@ -69,11 +69,14 @@ void CreateBundleTargetGenerator::DoRun() {
 
   if (!FillBundleDepsFilter())
     return;
+
+  if (!FillXcassetCompilerFlags())
+    return;
 }
 
 bool CreateBundleTargetGenerator::FillBundleDir(
     const SourceDir& bundle_root_dir,
-    const std::string_view& name,
+    std::string_view name,
     SourceDir* bundle_dir) {
   // All bundle_foo_dir properties are optional. They are only required if they
   // are used in an expansion. The check is performed there.
@@ -301,4 +304,15 @@ bool CreateBundleTargetGenerator::FillBundleDepsFilter() {
   }
 
   return true;
+}
+
+bool CreateBundleTargetGenerator::FillXcassetCompilerFlags() {
+  const Value* value = scope_->GetValue(variables::kXcassetCompilerFlags, true);
+  if (!value)
+    return true;
+
+  if (!value->VerifyTypeIs(Value::LIST, err_))
+    return false;
+
+  return target_->bundle_data().xcasset_compiler_flags().Parse(*value, err_);
 }

@@ -17,6 +17,8 @@ class SubstitutionList {
   SubstitutionList(const SubstitutionList& other);
   ~SubstitutionList();
 
+  SubstitutionList& operator=(const SubstitutionList&) = default;
+
   bool Parse(const Value& value, Err* err);
   bool Parse(const std::vector<std::string>& values,
              const ParseNode* origin,
@@ -25,7 +27,8 @@ class SubstitutionList {
   // Makes a SubstitutionList from the given hardcoded patterns.
   static SubstitutionList MakeForTest(const char* a,
                                       const char* b = nullptr,
-                                      const char* c = nullptr);
+                                      const char* c = nullptr,
+                                      const char* d = nullptr);
 
   const std::vector<SubstitutionPattern>& list() const { return list_; }
 

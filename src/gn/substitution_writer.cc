@@ -436,6 +436,8 @@ bool SubstitutionWriter::GetTargetSubstitution(const Target* target,
         target->label().GetUserVisibleName(!target->settings()->is_default());
   } else if (type == &SubstitutionLabelName) {
     *result = target->label().name();
+  } else if (type == &SubstitutionLabelNoToolchain) {
+    *result = target->label().GetUserVisibleName(false);
   } else if (type == &SubstitutionRootGenDir) {
     SetDirOrDotWithNoSlash(
         GetBuildDirAsOutputFile(BuildDirContext(target), BuildDirType::GEN)
@@ -576,6 +578,8 @@ std::string SubstitutionWriter::GetLinkerSubstitution(
   } else if (type == &kRustSubstitutionCrateName) {
     // Only include the toolchain for non-default toolchains.
     return target->rust_values().crate_name();
+  } else if (type == &CSubstitutionSwiftModuleName) {
+    return target->swift_values().module_name();
   } else {
     NOTREACHED();
     return std::string();

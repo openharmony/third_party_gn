@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/macros.h"
 #include "gn/label.h"
 #include "gn/label_ptr.h"
 #include "gn/scope.h"
@@ -22,10 +21,12 @@ class CTool : public Tool {
   // C compiler tools
   static const char* kCToolCc;
   static const char* kCToolCxx;
+  static const char* kCToolCxxModule;
   static const char* kCToolObjC;
   static const char* kCToolObjCxx;
   static const char* kCToolRc;
   static const char* kCToolAsm;
+  static const char* kCToolSwift;
 
   // C linker tools
   static const char* kCToolAlink;
@@ -107,6 +108,7 @@ class CTool : public Tool {
                                    Err* err);
   bool ReadOutputsPatternList(Scope* scope,
                               const char* var,
+                              bool required,
                               SubstitutionList* field,
                               Err* err);
   bool ReadPrecompiledHeaderType(Scope* scope, Err* err);
@@ -117,7 +119,8 @@ class CTool : public Tool {
   SubstitutionPattern link_output_;
   SubstitutionPattern depend_output_;
 
-  DISALLOW_COPY_AND_ASSIGN(CTool);
+  CTool(const CTool&) = delete;
+  CTool& operator=(const CTool&) = delete;
 };
 
 #endif  // TOOLS_GN_C_TOOL_H_

@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/macros.h"
 #include "gn/label.h"
 #include "gn/label_ptr.h"
 #include "gn/scope.h"
@@ -24,6 +23,7 @@ class Toolchain;
 class CTool;
 class GeneralTool;
 class RustTool;
+class BuiltinTool;
 
 // To add a new Tool category, create a subclass implementing SetComplete()
 // Add a new category to ToolCategories
@@ -63,6 +63,8 @@ class Tool {
   virtual const GeneralTool* AsGeneral() const;
   virtual RustTool* AsRust();
   virtual const RustTool* AsRust() const;
+  virtual BuiltinTool* AsBuiltin();
+  virtual const BuiltinTool* AsBuiltin() const;
 
   // Basic information ---------------------------------------------------------
 
@@ -84,9 +86,7 @@ class Tool {
   }
 
   // Launcher for the command (e.g. goma)
-  const std::string& command_launcher() const {
-    return command_launcher_;
-  }
+  const std::string& command_launcher() const { return command_launcher_; }
   void set_command_launcher(std::string l) {
     DCHECK(!complete_);
     command_launcher_ = std::move(l);
@@ -129,6 +129,14 @@ class Tool {
     framework_switch_ = std::move(s);
   }
 
+  const std::string& weak_framework_switch() const {
+    return weak_framework_switch_;
+  }
+  void set_weak_framework_switch(std::string s) {
+    DCHECK(!complete_);
+    weak_framework_switch_ = std::move(s);
+  }
+
   const std::string& framework_dir_switch() const {
     return framework_dir_switch_;
   }
@@ -149,6 +157,12 @@ class Tool {
     lib_dir_switch_ = std::move(s);
   }
 
+  const std::string& swiftmodule_switch() const { return swiftmodule_switch_; }
+  void set_swiftmodule_switch(std::string s) {
+    DCHECK(!complete_);
+    swiftmodule_switch_ = std::move(s);
+  }
+
   const std::string& linker_arg() const { return linker_arg_; }
   void set_linker_arg(std::string s) {
     DCHECK(!complete_);
@@ -159,6 +173,12 @@ class Tool {
   void set_outputs(SubstitutionList out) {
     DCHECK(!complete_);
     outputs_ = std::move(out);
+  }
+
+  const SubstitutionList& partial_outputs() const { return partial_outputs_; }
+  void set_partial_outputs(SubstitutionList partial_out) {
+    DCHECK(!complete_);
+    partial_outputs_ = std::move(partial_out);
   }
 
   const SubstitutionList& runtime_outputs() const { return runtime_outputs_; }
@@ -216,6 +236,7 @@ class Tool {
                                           Err* err);
 
   static const char* GetToolTypeForSourceType(SourceFile::Type type);
+
   static const char* GetToolTypeForTargetFinalOutput(const Target* target);
 
  protected:
@@ -259,11 +280,14 @@ class Tool {
   SubstitutionPattern depfile_;
   SubstitutionPattern description_;
   std::string framework_switch_;
+  std::string weak_framework_switch_;
   std::string framework_dir_switch_;
   std::string lib_switch_;
   std::string lib_dir_switch_;
+  std::string swiftmodule_switch_;
   std::string linker_arg_;
   SubstitutionList outputs_;
+  SubstitutionList partial_outputs_;
   SubstitutionList runtime_outputs_;
   std::string output_prefix_;
   bool restat_ = false;
@@ -275,7 +299,8 @@ class Tool {
 
   SubstitutionBits substitution_bits_;
 
-  DISALLOW_COPY_AND_ASSIGN(Tool);
+  Tool(const Tool&) = delete;
+  Tool& operator=(const Tool&) = delete;
 };
 
 #endif  // TOOLS_GN_TOOL_H_

@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+PYTHON_VERSION_COMPATIBILITY = 'PY3'
+
 DEPS = [
     'recipe_engine/cipd',
     'recipe_engine/context',
@@ -34,11 +36,11 @@ PROPERTIES = {
             ),
             default={
                 'sdk_version':
-                    '10b61',
+                    '12B5025f',
                 'tool_package':
                     'infra/tools/mac_toolchain/${platform}',
                 'tool_version':
-                    'git_revision:434f5462a77e7103f9d610fa5cabc426bb21502e',
+                    'git_revision:e9b1fe29fe21a1cd36428c43ea2aba244bd31280',
             },
         )
 }

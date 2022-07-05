@@ -7,7 +7,6 @@
 
 #include <iosfwd>
 
-#include "base/macros.h"
 #include "gn/path_output.h"
 #include "gn/substitution_type.h"
 
@@ -40,15 +39,32 @@ class NinjaTargetWriter {
   // identified by the given bits will be written.
   void WriteSharedVars(const SubstitutionBits& bits);
 
+  // Writes out the substitution values that are shared between C compiler tools
+  // and action tools. Only the substitutions identified by the given bits will
+  // be written.
+  // If respect_source_used is set, the generated substitution values will
+  // respect the types of source code used; otherwise they will respect the bits
+  // passed in.
+  void WriteCCompilerVars(const SubstitutionBits& bits,
+                          bool indent,
+                          bool respect_source_used);
+
+  // Writes out the substitution values that are shared between Rust tools
+  // and action tools. Only the substitutions identified by the given bits will
+  // be written, unless 'always_write' is specified.
+  void WriteRustCompilerVars(const SubstitutionBits& bits,
+                             bool indent,
+                             bool always_write);
+
   // Writes to the output stream a stamp rule for input dependencies, and
   // returns the file to be appended to source rules that encodes the
   // order-only dependencies for the current target.
   // If num_stamp_uses is small, this might return all input dependencies
   // directly, without writing a stamp file.
-  // If there are no implicit dependencies and no extra target dependencies
+  // If there are no implicit dependencies and no additional target dependencies
   // are passed in, this returns an empty vector.
   std::vector<OutputFile> WriteInputDepsStampAndGetDep(
-      const std::vector<const Target*>& extra_hard_deps,
+      const std::vector<const Target*>& additional_hard_deps,
       size_t num_stamp_uses) const;
 
   // Writes to the output file a final stamp rule for the target that stamps
@@ -66,7 +82,8 @@ class NinjaTargetWriter {
   void WriteCopyRules();
   void WriteEscapedSubstitution(const Substitution* type);
 
-  DISALLOW_COPY_AND_ASSIGN(NinjaTargetWriter);
+  NinjaTargetWriter(const NinjaTargetWriter&) = delete;
+  NinjaTargetWriter& operator=(const NinjaTargetWriter&) = delete;
 };
 
 #endif  // TOOLS_GN_NINJA_TARGET_WRITER_H_

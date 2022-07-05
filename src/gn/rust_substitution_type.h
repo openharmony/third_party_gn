@@ -20,7 +20,10 @@ extern const Substitution kRustSubstitutionExterns;
 extern const Substitution kRustSubstitutionRustDeps;
 extern const Substitution kRustSubstitutionRustEnv;
 extern const Substitution kRustSubstitutionRustFlags;
+extern const Substitution kRustSubstitutionSources;
 
 bool IsValidRustSubstitution(const Substitution* type);
+bool IsValidRustScriptArgsSubstitution(const Substitution* type);
+bool IsValidRustLinkerSubstitution(const Substitution* type);
 
 #endif  // TOOLS_GN_RUST_SUBSTITUTION_TYPE_H_

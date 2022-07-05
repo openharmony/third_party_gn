@@ -9,10 +9,9 @@
 #include <mutex>
 #include <set>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
-#include "base/containers/flat_set.h"
+#include "gn/hash_table_base.h"
 
 namespace {
 
@@ -42,6 +41,20 @@ static const std::string kEmptyString;
 
 using KeyType = const std::string*;
 
+// A HashTableBase node type that stores one hash value and one string pointer.
+struct KeyNode {
+  size_t hash;
+  KeyType key;
+
+  // The following methods are required by HashTableBase<>
+  bool is_valid() const { return !is_null(); }
+  bool is_null() const { return !key; }
+  size_t hash_value() const { return hash; }
+
+  // No deletion support means faster lookup code.
+  static constexpr bool is_tombstone() { return false; }
+};
+
 // This is a trivial hash table of string pointers, using open addressing.
 // It is faster in practice than using a standard container or even a
 // base::flat_set<>.
@@ -58,11 +71,9 @@ using KeyType = const std::string*;
 //        and call Insert(), passing the |node|, |hash| and new string
 //        address as arguments.
 //
-struct KeySet {
-  struct Node {
-    size_t hash = 0;
-    KeyType key = nullptr;
-  };
+struct KeySet : public HashTableBase<KeyNode> {
+  using BaseType = HashTableBase<KeyNode>;
+  using Node = BaseType::Node;
 
   // Compute hash for |str|. Replace with faster hash function if available.
   static size_t Hash(std::string_view str) {
@@ -79,53 +90,19 @@ struct KeySet {
   //       passed to Insert() in case of a miss.
   //
   Node* Lookup(size_t hash, std::string_view str) const {
-    size_t index = hash & (size_ - 1);
-    const Node* nodes = &buckets_[0];
-    const Node* nodes_limit = nodes + size_;
-    const Node* node = nodes + index;
-    for (;;) {
-      if (!node->key || (node->hash == hash && *node->key == str))
-        return const_cast<Node*>(node);
-      if (++node == nodes_limit)
-        node = nodes;
-    }
+    return BaseType::NodeLookup(hash, [hash, &str](const Node* node) {
+      // NOTE: Only is_valid() node pointers are passed to this function
+      // which means key won't be null, and there are no tombstone values
+      // in this derivation of HashTableBase<>.
+      return node->hash == hash && *node->key == str;
+    });
   }
 
-  // Insert a new key in this set. |node| must be a value returned by
-  // a previous Lookup() call. |hash| is the hash value for |key|.
   void Insert(Node* node, size_t hash, KeyType key) {
     node->hash = hash;
     node->key = key;
-    count_ += 1;
-    if (count_ * 4 >= size_ * 3)  // 75% max load factor
-      GrowBuckets();
+    BaseType::UpdateAfterInsert();
   }
-
-  void GrowBuckets() {
-    size_t size = buckets_.size();
-    size_t new_size = size * 2;
-    size_t new_mask = new_size - 1;
-
-    std::vector<Node> new_buckets;
-    new_buckets.resize(new_size);
-    for (const Node& node : buckets_) {
-      size_t index = node.hash & new_mask;
-      for (;;) {
-        Node& node2 = new_buckets[index];
-        if (!node2.key) {
-          node2 = node;
-          break;
-        }
-        index = (index + 1) & new_mask;
-      }
-    }
-    buckets_ = std::move(new_buckets);
-    size_ = new_size;
-  }
-
-  size_t size_ = 2;
-  size_t count_ = 0;
-  std::vector<Node> buckets_ = {Node{}, Node{}};
 };
 
 class StringAtomSet {
@@ -185,7 +162,7 @@ class StringAtomSet {
    public:
     // Init the n-th string in the slab with |str|.
     // Return its location as well.
-    std::string* init(size_t index, const std::string_view& str) {
+    std::string* init(size_t index, std::string_view str) {
       std::string* result = &items_[index].str;
       new (result) std::string(str);
       return result;
@@ -227,11 +204,22 @@ class ThreadLocalCache {
   KeySet local_set_;
 };
 
+#if !defined(OS_ZOS)
 thread_local ThreadLocalCache s_local_cache;
+#else
+// TODO(gabylb) - zos: thread_local not yet supported, use zoslib's impl'n:
+static ThreadLocalCache s_tlc;
+__tlssim<ThreadLocalCache*> __g_s_local_cache_impl(&s_tlc);
+#define s_local_cache (*__g_s_local_cache_impl.access())
+#endif
 
 }  // namespace
 
 StringAtom::StringAtom() : value_(kEmptyString) {}
 
 StringAtom::StringAtom(std::string_view str) noexcept
+#ifndef OS_ZOS
     : value_(*s_local_cache.find(str)) {}
+#else
+    : value_(*s_local_cache->find(str)) {}
+#endif
