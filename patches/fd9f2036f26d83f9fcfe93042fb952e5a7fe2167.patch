@@ -1,0 +1,94 @@
+commit 86087bbf2aa81100e77e44ee4ea096a5d2870088
+Author: chenmudan <chenmudan@huawei.com>
+Date:   Sat Oct 8 20:51:42 2022 +0800
+
+    Revert "Fix output directories for generated source files."
+
+    This reverts commit fd9f2036f26d83f9fcfe93042fb952e5a7fe2167.
+
+diff --git a/src/gn/filesystem_utils.cc b/src/gn/filesystem_utils.cc
+index 7a7078ed..6de3fbdf 100644
+--- a/src/gn/filesystem_utils.cc
++++ b/src/gn/filesystem_utils.cc
+@@ -1025,25 +1025,10 @@ OutputFile GetSubBuildDirAsOutputFile(const BuildDirContext& context,
+   OutputFile result = GetBuildDirAsOutputFile(context, type);
+
+   if (source_dir.is_source_absolute()) {
+-    std::string_view build_dir = context.build_settings->build_dir().value();
+-    std::string_view source_dir_path = source_dir.value();
+-    if (source_dir_path.substr(0, build_dir.size()) == build_dir) {
+-      // The source dir is source-absolute, but in the build directory
+-      // (e.g. `//out/Debug/gen/src/foo.cc` or
+-      // `//out/Debug/toolchain1/gen/foo.cc`), which happens for generated
+-      // sources. In this case, remove the build directory prefix, and replace
+-      // it with `BUILD_DIR`. This will create results like `obj/BUILD_DIR/gen`
+-      // or `toolchain2/obj/BUILD_DIR/toolchain1/gen` which look surprising,
+-      // but guarantee unicity.
+-      result.value().append("BUILD_DIR/");
+-      result.value().append(&source_dir_path[build_dir.size()],
+-                            source_dir_path.size() - build_dir.size());
+-    } else {
+-      // The source dir is source-absolute, so we trim off the two leading
+-      // slashes to append to the toolchain object directory.
+-      result.value().append(&source_dir.value()[2],
+-                            source_dir.value().size() - 2);
+-    }
++    // The source dir is source-absolute, so we trim off the two leading
++    // slashes to append to the toolchain object directory.
++    result.value().append(&source_dir.value()[2],
++                          source_dir.value().size() - 2);
+   } else {
+     // System-absolute.
+     AppendFixedAbsolutePathSuffix(context.build_settings, source_dir, &result);
+diff --git a/src/gn/ninja_c_binary_target_writer_unittest.cc b/src/gn/ninja_c_binary_target_writer_unittest.cc
+index 94761931..6056c368 100644
+--- a/src/gn/ninja_c_binary_target_writer_unittest.cc
++++ b/src/gn/ninja_c_binary_target_writer_unittest.cc
+@@ -405,18 +405,18 @@ TEST_F(NinjaCBinaryTargetWriterTest, NoHardDepsToNoPublicHeaderTarget) {
+       "target_out_dir = obj/foo\n"
+       "target_output_name = gen_obj\n"
+       "\n"
+-      "build obj/BUILD_DIR/gen_obj.generated.o: cxx generated.cc"
++      "build obj/out/Debug/gen_obj.generated.o: cxx generated.cc"
+       " || obj/foo/generate.stamp\n"
+       "  source_file_part = generated.cc\n"
+       "  source_name_part = generated\n"
+       "\n"
+-      "build obj/foo/gen_obj.stamp: stamp obj/BUILD_DIR/gen_obj.generated.o"
++      "build obj/foo/gen_obj.stamp: stamp obj/out/Debug/gen_obj.generated.o"
+       // The order-only dependency here is strictly unnecessary since the
+       // sources list this as an order-only dep.
+       " || obj/foo/generate.stamp\n";
+
+   std::string obj_str = obj_out.str();
+-  EXPECT_EQ(std::string(obj_expected), obj_str);
++  EXPECT_EQ(obj_expected, obj_str);
+
+   // A shared library depends on gen_obj, having corresponding header for
+   // generated obj.
+@@ -442,7 +442,7 @@ TEST_F(NinjaCBinaryTargetWriterTest, NoHardDepsToNoPublicHeaderTarget) {
+       "target_output_name = libgen_lib\n"
+       "\n"
+       "\n"
+-      "build ./libgen_lib.so: solink obj/BUILD_DIR/gen_obj.generated.o"
++      "build ./libgen_lib.so: solink obj/out/Debug/gen_obj.generated.o"
+       // The order-only dependency here is strictly unnecessary since
+       // obj/out/Debug/gen_obj.generated.o has dependency to
+       // obj/foo/gen_obj.stamp
+diff --git a/src/gn/substitution_writer_unittest.cc b/src/gn/substitution_writer_unittest.cc
+index eaa521ab..fc3c4469 100644
+--- a/src/gn/substitution_writer_unittest.cc
++++ b/src/gn/substitution_writer_unittest.cc
+@@ -45,12 +45,6 @@ TEST(SubstitutionWriter, ApplyPatternToSource) {
+   SourceFile result = SubstitutionWriter::ApplyPatternToSource(
+       nullptr, setup.settings(), pattern, SourceFile("//foo/bar/myfile.txt"));
+   ASSERT_EQ("//out/Debug/gen/foo/bar/myfile.tmp", result.value());
+-
+-  result = SubstitutionWriter::ApplyPatternToSource(
+-      nullptr, setup.settings(), pattern,
+-      SourceFile("//out/Debug/gen/generated_file.cc"));
+-  ASSERT_EQ("//out/Debug/gen/BUILD_DIR/gen/generated_file.tmp", result.value())
+-      << result.value();
+ }
+
+ TEST(SubstitutionWriter, ApplyPatternToSourceAsOutputFile) {
