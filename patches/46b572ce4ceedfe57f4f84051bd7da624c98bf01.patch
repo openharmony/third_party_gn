@@ -1,0 +1,173 @@
+commit 6b9e70094578670713bd510ee32adfb5ff8b7822
+Author: chenmudan <chenmudan@huawei.com>
+Date:   Sat Oct 8 20:51:49 2022 +0800
+
+    Revert "Fix configs visibility not always working"
+
+    This reverts commit 46b572ce4ceedfe57f4f84051bd7da624c98bf01.
+
+diff --git a/docs/reference.md b/docs/reference.md
+index 51dcecc3..a71f1b1f 100644
+--- a/docs/reference.md
++++ b/docs/reference.md
+@@ -1767,10 +1767,10 @@
+   The `output_conversion` variable specified the format to write the
+   value. See `gn help io_conversion`.
+
+-  One of `contents` or `data_keys` must be specified; use of `contents` will
+-  write the contents of that value to file, while use of `data_keys` will
+-  trigger a metadata collection walk based on the dependencies of the target and
+-  the optional values of the `rebase` and `walk_keys` variables. See
++  One of `contents` or `data_keys` must be specified; use of `data` will write
++  the contents of that value to file, while use of `data_keys` will trigger a
++  metadata collection walk based on the dependencies of the target and the
++  optional values of the `rebase` and `walk_keys` variables. See
+   `gn help metadata`.
+
+   Collected metadata, if specified, will be returned in postorder of
+@@ -2220,7 +2220,6 @@
+          libs, precompiled_header, precompiled_source, rustflags,
+          rustenv, swiftflags, testonly
+   Nested configs: configs
+-  General: visibility
+ ```
+
+ #### **Variables on a target used to apply configs**
+diff --git a/src/gn/config_values_extractors_unittest.cc b/src/gn/config_values_extractors_unittest.cc
+index 3db4bff9..860d87ca 100644
+--- a/src/gn/config_values_extractors_unittest.cc
++++ b/src/gn/config_values_extractors_unittest.cc
+@@ -36,7 +36,6 @@ TEST(ConfigValuesExtractors, IncludeOrdering) {
+
+   // Set up dep2, direct and all dependent configs.
+   Config dep2_all(setup.settings(), Label(SourceDir("//dep2/"), "all"));
+-  dep2_all.visibility().SetPublic();
+   dep2_all.own_values().cflags().push_back("--dep2-all");
+   dep2_all.own_values().cflags().push_back("--dep2-all");
+   dep2_all.own_values().include_dirs().push_back(SourceDir("//dep2/all/"));
+@@ -44,7 +43,6 @@ TEST(ConfigValuesExtractors, IncludeOrdering) {
+   ASSERT_TRUE(dep2_all.OnResolved(&err));
+
+   Config dep2_direct(setup.settings(), Label(SourceDir("//dep2/"), "direct"));
+-  dep2_direct.visibility().SetPublic();
+   dep2_direct.own_values().cflags().push_back("--dep2-direct");
+   dep2_direct.own_values().include_dirs().push_back(
+       SourceDir("//dep2/direct/"));
+@@ -60,19 +58,16 @@ TEST(ConfigValuesExtractors, IncludeOrdering) {
+   // Set up dep1, direct and all dependent configs. Also set up a subconfig
+   // on "dep1_all" to test sub configs.
+   Config dep1_all_sub(setup.settings(), Label(SourceDir("//dep1"), "allch"));
+-  dep1_all_sub.visibility().SetPublic();
+   dep1_all_sub.own_values().cflags().push_back("--dep1-all-sub");
+   ASSERT_TRUE(dep1_all_sub.OnResolved(&err));
+
+   Config dep1_all(setup.settings(), Label(SourceDir("//dep1/"), "all"));
+-  dep1_all.visibility().SetPublic();
+   dep1_all.own_values().cflags().push_back("--dep1-all");
+   dep1_all.own_values().include_dirs().push_back(SourceDir("//dep1/all/"));
+   dep1_all.configs().push_back(LabelConfigPair(&dep1_all_sub));
+   ASSERT_TRUE(dep1_all.OnResolved(&err));
+
+   Config dep1_direct(setup.settings(), Label(SourceDir("//dep1/"), "direct"));
+-  dep1_direct.visibility().SetPublic();
+   dep1_direct.own_values().cflags().push_back("--dep1-direct");
+   dep1_direct.own_values().include_dirs().push_back(
+       SourceDir("//dep1/direct/"));
+diff --git a/src/gn/functions.cc b/src/gn/functions.cc
+index 6294f79b..827f505a 100644
+--- a/src/gn/functions.cc
++++ b/src/gn/functions.cc
+@@ -332,7 +332,6 @@ Variables valid in a config definition
+     CONFIG_VALUES_VARS_HELP
+
+     R"(  Nested configs: configs
+-  General: visibility
+
+ Variables on a target used to apply configs
+
+diff --git a/src/gn/target.cc b/src/gn/target.cc
+index 7b545b52..4b3bad38 100644
+--- a/src/gn/target.cc
++++ b/src/gn/target.cc
+@@ -453,16 +453,16 @@ bool Target::OnResolved(Err* err) {
+   ScopedTrace trace(TraceItem::TRACE_ON_RESOLVED, label());
+   trace.SetToolchain(settings()->toolchain_label());
+
++  // Check visibility for just this target's own configs, before dependents are
++  // added.
++  if (!CheckConfigVisibility(err))
++    return false;
++
+   // Copy this target's own dependent and public configs to the list of configs
+   // applying to it.
+   configs_.Append(all_dependent_configs_.begin(), all_dependent_configs_.end());
+   MergePublicConfigsFrom(this, &configs_);
+
+-  // Check visibility for just this target's own configs, before dependents are
+-  // added, but after public_configs and all_dependent_configs are merged.
+-  if (!CheckConfigVisibility(err))
+-    return false;
+-
+   // Copy public configs from all dependencies into the list of configs
+   // applying to this target (configs_).
+   PullDependentTargetConfigs();
+diff --git a/src/gn/target_unittest.cc b/src/gn/target_unittest.cc
+index b4ea6990..f91ead77 100644
+--- a/src/gn/target_unittest.cc
++++ b/src/gn/target_unittest.cc
+@@ -511,54 +511,6 @@ TEST_F(TargetTest, VisibilityFails) {
+   ASSERT_FALSE(a.OnResolved(&err));
+ }
+
+-// Test config visibility failure cases.
+-TEST_F(TargetTest, VisibilityConfigFails) {
+-  TestWithScope setup;
+-  Err err;
+-
+-  Label config_label(SourceDir("//a/"), "config");
+-  Config config(setup.settings(), config_label);
+-  config.visibility().SetPrivate(config.label().dir());
+-  ASSERT_TRUE(config.OnResolved(&err));
+-
+-  // Make a target using configs. This should fail.
+-  TestTarget a(setup, "//app:a", Target::EXECUTABLE);
+-  a.configs().push_back(LabelConfigPair(&config));
+-  ASSERT_FALSE(a.OnResolved(&err));
+-
+-  // A target using public_configs should also fail.
+-  TestTarget b(setup, "//app:b", Target::EXECUTABLE);
+-  b.public_configs().push_back(LabelConfigPair(&config));
+-  ASSERT_FALSE(b.OnResolved(&err));
+-
+-  // A target using all_dependent_configs should fail as well.
+-  TestTarget c(setup, "//app:c", Target::EXECUTABLE);
+-  c.all_dependent_configs().push_back(LabelConfigPair(&config));
+-  ASSERT_FALSE(c.OnResolved(&err));
+-}
+-
+-// Test Config -> Group -> A where the config is group is visible from A but
+-// the config isn't, and the config is visible from the group.
+-TEST_F(TargetTest, VisibilityConfigGroup) {
+-  TestWithScope setup;
+-  Err err;
+-
+-  Label config_label(SourceDir("//a/"), "config");
+-  Config config(setup.settings(), config_label);
+-  config.visibility().SetPrivate(config.label().dir());
+-  ASSERT_TRUE(config.OnResolved(&err));
+-
+-  // Make a target using the config in the same directory.
+-  TestTarget a(setup, "//a:a", Target::GROUP);
+-  a.public_configs().push_back(LabelConfigPair(&config));
+-  ASSERT_TRUE(a.OnResolved(&err));
+-
+-  // A target depending on a should be okay.
+-  TestTarget b(setup, "//app:b", Target::EXECUTABLE);
+-  b.private_deps().push_back(LabelTargetPair(&a));
+-  ASSERT_TRUE(b.OnResolved(&err));
+-}
+-
+ // Test visibility with a single data_dep.
+ TEST_F(TargetTest, VisibilityDatadeps) {
+   TestWithScope setup;
+
