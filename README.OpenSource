@@ -1,7 +1,7 @@
 [
   {
     "Name": "gn",
-    "License": "BSD-style License",
+    "License": "BSD-3-Clause",
     "License File": "LICENSE",
     "Version Number": "1cdd270be9803dbfcdd0343f6104ad4dc30c38ce",
     "Owner": "wangweichao2@huawei.com",
