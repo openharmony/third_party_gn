@@ -16,6 +16,7 @@
 #include "gn/config_values_generator.h"
 #include "gn/err.h"
 #include "gn/input_file.h"
+#include "gn/ohos_components_checker.h"
 #include "gn/parse_node_value_adapter.h"
 #include "gn/parse_tree.h"
 #include "gn/pool.h"
@@ -666,6 +667,11 @@ Value RunImport(Scope* scope,
   if (!err->has_error()) {
     scope->settings()->import_manager().DoImport(import_file, function, scope,
                                                  err);
+  }
+  const OhosComponentChecker *checker = OhosComponentChecker::getInstance();
+  if (checker != nullptr) {
+      checker->CheckImportOther(function, scope->settings()->build_settings(), 
+                                input_dir.value(), import_file.value(), err);
   }
   return Value();
 }

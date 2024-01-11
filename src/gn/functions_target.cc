@@ -543,6 +543,10 @@ Examples
     # names in the gen dir. This will just copy each file.
     outputs = [ "$target_gen_dir/{{source_file_part}}" ]
   }
+
+Variables
+
+  copy_linkable_file
 )";
 
 Value RunCopy(const FunctionCallNode* function,

@@ -21,7 +21,10 @@
 #include "gn/functions.h"
 #include "gn/generated_file_target_generator.h"
 #include "gn/group_target_generator.h"
+#include "gn/innerapis_publicinfo_generator.h"
 #include "gn/metadata.h"
+#include "gn/ohos_components.h"
+#include "gn/ohos_variables.h"
 #include "gn/parse_tree.h"
 #include "gn/scheduler.h"
 #include "gn/scope.h"
@@ -166,6 +169,12 @@ void TargetGenerator::GenerateTarget(Scope* scope,
     *err = Err(function_call, "Can't define a target in this context.");
     return;
   }
+
+  InnerApiPublicInfoGenerator* instance = InnerApiPublicInfoGenerator::getInstance();
+  if (instance != nullptr) {
+    instance->GeneratedInnerapiPublicInfo(target.get(), label, scope, output_type, err);
+  }
+
   collector->push_back(std::move(target));
 }
 
@@ -256,6 +265,12 @@ bool TargetGenerator::FillData() {
 bool TargetGenerator::FillDependencies() {
   if (!FillGenericDeps(variables::kDeps, &target_->private_deps()))
     return false;
+  if (scope_->settings()->build_settings()->is_ohos_components_enabled()) {
+    if (!FillOhosComponentDeps(variables::kExternalDeps, &target_->private_deps()))
+      return false;
+    if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps()))
+      return false;
+  }
   if (!FillGenericDeps(variables::kPublicDeps, &target_->public_deps()))
     return false;
   if (!FillGenericDeps(variables::kDataDeps, &target_->data_deps()))
@@ -433,6 +448,17 @@ bool TargetGenerator::FillGenericDeps(const char* var_name,
   return !err_->has_error();
 }
 
+bool TargetGenerator::FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest) 
+{
+  const Value* value = scope_->GetValue(var_name, true);
+  if (value) {
+    // Append to private deps
+    ExtractListOfExternalDeps(scope_->settings()->build_settings(), *value,
+                              scope_->GetSourceDir(), ToolchainLabelForScope(scope_),
+                              dest, err_);
+  }
+  return !err_->has_error();
+}
 bool TargetGenerator::FillWriteRuntimeDeps() {
   const Value* value = scope_->GetValue(variables::kWriteRuntimeDeps, true);
   if (!value)

@@ -56,6 +56,13 @@ bool ExtractListOfLabels(const BuildSettings* build_settings,
                          LabelTargetVector* dest,
                          Err* err);
 
+bool ExtractListOfExternalDeps(const BuildSettings* build_settings,
+                               const Value& value,
+                               const SourceDir& current_dir,
+                               const Label& current_toolchain,
+                               LabelTargetVector* dest,
+                               Err* err);
+
 // Extracts the list of labels and their origins to the given vector. For the
 // version taking Label*Pair, only the labels are filled in, the ptr for each
 // pair in the vector will be null. Sets an error and returns false if a label

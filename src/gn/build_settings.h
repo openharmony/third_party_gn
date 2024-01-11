@@ -20,6 +20,8 @@
 #include "gn/version.h"
 
 class Item;
+class OhosComponent;
+class OhosComponents;
 
 // Settings for one build, which is one toplevel output directory. There
 // may be multiple Settings objects that refer to this, one for each toolchain.
@@ -54,6 +56,12 @@ class BuildSettings {
   // Path of the python executable to run scripts with.
   base::FilePath python_path() const { return python_path_; }
   void set_python_path(const base::FilePath& p) { python_path_ = p; }
+
+  // OpenHarmony components manager.
+  void SetOhosComponentsInfo(OhosComponents *ohos_components);
+  bool GetExternalDepsLabel(const Value& external_dep, std::string& label, Err* err) const;
+  bool is_ohos_components_enabled() const;
+  const OhosComponent *GetOhosComponent(const std::string& label) const;
 
   // Required Ninja version.
   const Version& ninja_required_version() const {
@@ -140,6 +148,8 @@ class BuildSettings {
   std::string root_path_utf8_;
   base::FilePath secondary_source_path_;
   base::FilePath python_path_;
+
+  OhosComponents *ohos_components_ = nullptr;
 
   // See 40045b9 for the reason behind using 1.7.2 as the default version.
   Version ninja_required_version_{1, 7, 2};

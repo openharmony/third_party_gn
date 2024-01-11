@@ -56,7 +56,7 @@ class Visibility {
 
   // Helper function to check visibility between the given two items. If
   // to is invisible to from, returns false and sets the error.
-  static bool CheckItemVisibility(const Item* from, const Item* to, Err* err);
+  static bool CheckItemVisibility(const Item* from, const Item* to, bool is_external_deps, Err* err);
 
   // Helper function to fill an item's visibility from the "visibility" value
   // in the current scope.

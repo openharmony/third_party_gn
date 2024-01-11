@@ -6,6 +6,7 @@
 
 #include "gn/build_settings.h"
 #include "gn/filesystem_utils.h"
+#include "gn/ohos_variables.h"
 #include "gn/parse_tree.h"
 #include "gn/scope.h"
 #include "gn/value.h"
@@ -17,6 +18,17 @@ CopyTargetGenerator::CopyTargetGenerator(Target* target,
     : TargetGenerator(target, scope, function_call, err) {}
 
 CopyTargetGenerator::~CopyTargetGenerator() = default;
+
+bool CopyTargetGenerator::FillCopyLinkableFile() 
+{
+    const Value* value = scope_->GetValue(variables::kCopyLinkableFile, true);
+    if (!value)
+        return true;
+    if (!value->VerifyTypeIs(Value::BOOLEAN, err_))
+        return false;
+    target_->set_copy_linkable_file(value->boolean_value());
+  return true;
+}
 
 void CopyTargetGenerator::DoRun() {
   target_->set_output_type(Target::COPY_FILES);
@@ -41,4 +53,7 @@ void CopyTargetGenerator::DoRun() {
         "source_expansion\").");
     return;
   }
+
+  if (!FillCopyLinkableFile())
+    return;
 }

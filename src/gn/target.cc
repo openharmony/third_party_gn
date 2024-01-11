@@ -541,6 +541,9 @@ bool Target::IsBinary() const {
 }
 
 bool Target::IsLinkable() const {
+  if (output_type_ == COPY_FILES) {
+    return copy_linkable_file();
+  }
   return output_type_ == STATIC_LIBRARY || output_type_ == SHARED_LIBRARY ||
          output_type_ == RUST_LIBRARY || output_type_ == RUST_PROC_MACRO;
 }
@@ -762,7 +765,9 @@ void Target::PullDependentTargetLibsFrom(const Target* dep, bool is_public) {
       dep->output_type() == RUST_LIBRARY ||
       dep->output_type() == SOURCE_SET ||
       (dep->output_type() == CREATE_BUNDLE &&
-       dep->bundle_data().is_framework())) {
+       dep->bundle_data().is_framework()) ||
+      (dep->output_type() == COPY_FILES &&
+       dep->copy_linkable_file())) {
     inherited_libraries_.Append(dep, is_public);
   }
 
@@ -771,7 +776,9 @@ void Target::PullDependentTargetLibsFrom(const Target* dep, bool is_public) {
   if (dep->output_type() == STATIC_LIBRARY ||
       dep->output_type() == SHARED_LIBRARY ||
       dep->output_type() == SOURCE_SET || dep->output_type() == RUST_LIBRARY ||
-      dep->output_type() == GROUP) {
+      dep->output_type() == GROUP ||
+      (dep->output_type() == COPY_FILES &&
+       dep->copy_linkable_file())) {
     // Here we have: `this` --[depends-on]--> `dep`
     //
     // The `this` target has direct access to `dep` since its a direct
@@ -798,7 +805,9 @@ void Target::PullDependentTargetLibsFrom(const Target* dep, bool is_public) {
     rust_transitive_inheritable_libs_.Append(dep, is_public);
   }
 
-  if (dep->output_type() == SHARED_LIBRARY) {
+  if ((dep->output_type() == SHARED_LIBRARY) ||
+      (dep->output_type() == COPY_FILES &&
+       dep->copy_linkable_file())) {
     // Shared library dependendencies are inherited across public shared
     // library boundaries.
     //
@@ -1048,6 +1057,11 @@ bool Target::FillOutputFiles(Err* err) {
           OutputFile(settings()->build_settings(), out));
   }
 
+  if ((output_type_ == COPY_FILES) && copy_linkable_file()) {
+    std::vector<OutputFile> tool_outputs;
+    link_output_file_ = computed_outputs()[0];
+  }
+
   return true;
 }
 
@@ -1112,7 +1126,7 @@ bool Target::ResolvePrecompiledHeaders(Err* err) {
 
 bool Target::CheckVisibility(Err* err) const {
   for (const auto& pair : GetDeps(DEPS_ALL)) {
-    if (!Visibility::CheckItemVisibility(this, pair.ptr, err))
+    if (!Visibility::CheckItemVisibility(this, pair.ptr, pair.is_external_deps, err))
       return false;
   }
   return true;
@@ -1121,7 +1135,7 @@ bool Target::CheckVisibility(Err* err) const {
 bool Target::CheckConfigVisibility(Err* err) const {
   for (ConfigValuesIterator iter(this); !iter.done(); iter.Next()) {
     if (const Config* config = iter.GetCurrentConfig())
-      if (!Visibility::CheckItemVisibility(this, config, err))
+      if (!Visibility::CheckItemVisibility(this, config, false, err))
         return false;
   }
   return true;

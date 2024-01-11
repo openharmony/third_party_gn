@@ -164,6 +164,14 @@ class Target : public Item {
     complete_static_lib_ = complete;
   }
 
+    // Whether this copy target is linkable.
+    bool copy_linkable_file() const { return copy_linkable_file_; }
+    void set_copy_linkable_file(bool linkable) 
+    {
+        DCHECK_EQ(COPY_FILES, output_type_);
+        copy_linkable_file_ = linkable;
+    }
+
   // Metadata. Target takes ownership of the resulting scope.
   const Metadata& metadata() const;
   Metadata& metadata();
@@ -479,6 +487,7 @@ class Target : public Item {
   FileList public_headers_;
   bool check_includes_ = true;
   bool complete_static_lib_ = false;
+  bool copy_linkable_file_ = false;
   std::vector<std::string> data_;
   std::unique_ptr<BundleData> bundle_data_;
   OutputFile write_runtime_deps_output_;
