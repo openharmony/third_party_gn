@@ -168,6 +168,21 @@ Variables
       required version is 1.7.2. Specifying a higher version might enable the
       use of some of newer features that can make the build more efficient.
 
+    ohos_components_support [optional]
+        This parameter enable support for OpenHarmony components.
+        When enabled, gn will load components information from "build_configs/"
+        directory in the root_out_directory.
+
+    The following files will be loaded:
+        out/build_configs/parts_info/inner_kits_info.json (required):
+          Required InnerAPI information file for each OHOS component.
+        out/build_configs/component_override_map.json (optional):
+          Optional overrided component maps file.
+
+    For OpenHarmony system build, this value must be enabled to support
+      external_deps (see "gn help external_deps") and public_external_deps
+      (see "gn help public_external_deps").
+
 Example .gn file contents
 
   buildconfig = "//build/config/BUILDCONFIG.gn"
@@ -386,6 +401,28 @@ bool Setup::DoSetup(const std::string& build_dir,
   return true;
 }
 
+bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
+{
+  // Load OpenHarmony system components definition file.
+  const Value *support =
+      dotfile_scope_.GetValue("ohos_components_support", true);
+  if (!ohos_components_.LoadOhosComponents(build_dir, support, err)) {
+    return false;
+  }
+
+  if (ohos_components_.isOhosComponentsLoaded()) {
+    build_settings_.SetOhosComponentsInfo(&ohos_components_);
+  }
+  
+  const Value* checkType = build_settings_.build_args().GetArgOverride("ohos_components_checktype");
+  if (checkType && checkType->type() == Value::INTEGER) {
+      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value());
+  } else {
+      ohos_components_.LoadOhosComponentsChecker(build_dir, support, 0);
+  }
+  return true;
+}
+
 bool Setup::DoSetupWithErr(const std::string& build_dir,
                            bool force_create,
                            const base::CommandLine& cmdline,
@@ -420,6 +457,11 @@ bool Setup::DoSetupWithErr(const std::string& build_dir,
     if (!FillArguments(cmdline, err))
       return false;
   }
+
+  if (!FillOhosComponentsInfo(build_dir, err)) {
+    return false;
+  }
+
   if (!FillPythonPath(cmdline, err))
     return false;
 

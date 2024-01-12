@@ -8,6 +8,7 @@
 
 #include "base/files/file_util.h"
 #include "gn/filesystem_utils.h"
+#include "gn/ohos_components.h"
 
 BuildSettings::BuildSettings() = default;
 
@@ -73,4 +74,34 @@ void BuildSettings::ItemDefined(std::unique_ptr<Item> item) const {
   DCHECK(item);
   if (item_defined_callback_)
     item_defined_callback_(std::move(item));
+}
+
+void BuildSettings::SetOhosComponentsInfo(OhosComponents *ohos_components)
+{
+  ohos_components_ = ohos_components;
+}
+
+bool BuildSettings::GetExternalDepsLabel(const Value& external_dep, std::string& label, Err* err) const
+{
+  if (ohos_components_ == nullptr) {
+    *err = Err(external_dep, "You are using OpenHarmony external_deps, but no components information loaded.");
+    return false;
+  }
+  return ohos_components_->GetExternalDepsLabel(external_dep, label, err);
+}
+
+bool BuildSettings::is_ohos_components_enabled() const
+{
+  if (ohos_components_ != nullptr) {
+    return true;
+  }
+  return false;
+}
+
+const OhosComponent *BuildSettings::GetOhosComponent(const std::string& label) const
+{
+  if (ohos_components_ == nullptr) {
+    return nullptr;
+  }
+  return ohos_components_->GetComponentByLabel(label);
 }

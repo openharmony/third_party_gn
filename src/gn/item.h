@@ -13,6 +13,7 @@
 #include "gn/visibility.h"
 
 class Config;
+class OhosComponent;
 class ParseNode;
 class Pool;
 class Settings;
@@ -71,6 +72,8 @@ class Item {
   // returns false on failure.
   virtual bool OnResolved(Err* err);
 
+  const OhosComponent *ohos_component() const { return component; };
+
  private:
   bool CheckTestonly(Err* err) const;
 
@@ -81,6 +84,8 @@ class Item {
 
   bool testonly_ = false;
   Visibility visibility_;
+
+  const OhosComponent *component;
 };
 
 #endif  // TOOLS_GN_ITEM_H_

@@ -34,6 +34,25 @@ bool ListValueExtractor(const Value& value,
   return true;
 }
 
+// Sets the error and returns false on failure.
+template <typename T, class Converter>
+bool ListValueAppender(const Value& value,
+                       std::vector<T>* dest,
+                       Err* err,
+                       const Converter& converter)
+{
+  if (!value.VerifyTypeIs(Value::LIST, err))
+    return false;
+  const std::vector<Value>& input_list = value.list_value();
+  for (const auto& item : input_list) {
+    T new_one;
+    if (!converter(item, &new_one, err))
+      return false;
+    dest->push_back(new_one);
+  }
+  return true;
+}
+
 // Like the above version but extracts to a UniqueVector and sets the error if
 // there are duplicates.
 template <typename T, class Converter>
@@ -193,6 +212,36 @@ struct LabelPtrResolver {
   const Label& current_toolchain;
 };
 
+// Fills the label part of a LabelPtrPair, leaving the pointer null.
+template <typename T>
+struct ExternalDepPtrResolver {
+  ExternalDepPtrResolver(const BuildSettings* build_settings_in,
+                         const SourceDir& current_dir_in,
+                         const Label& current_toolchain_in)
+      : build_settings(build_settings_in),
+        current_dir(current_dir_in),
+        current_toolchain(current_toolchain_in) {}
+  bool operator()(const Value& v, LabelPtrPair<T>* out, Err* err) const
+  {
+    if (!v.VerifyTypeIs(Value::STRING, err)) {
+      return false;
+    }
+    std::string label;
+    if (!build_settings->GetExternalDepsLabel(v, label, err)) {
+      return false;
+    }
+    Value external_dep(v.origin(), label);
+    out->label = Label::Resolve(current_dir, build_settings->root_path_utf8(),
+                                current_toolchain, external_dep, err);
+    out->origin = v.origin();
+    out->is_external_deps = true;
+    return !err->has_error();
+  }
+  const BuildSettings* build_settings;
+  const SourceDir& current_dir;
+  const Label& current_toolchain;
+};
+
 struct LabelPatternResolver {
   LabelPatternResolver(const BuildSettings* build_settings_in,
                        const SourceDir& current_dir_in)
@@ -260,6 +309,17 @@ bool ExtractListOfLabels(const BuildSettings* build_settings,
   return ListValueExtractor(
       value, dest, err,
       LabelPtrResolver<Target>(build_settings, current_dir, current_toolchain));
+}
+
+bool ExtractListOfExternalDeps(const BuildSettings* build_settings,
+                               const Value& value,
+                               const SourceDir& current_dir,
+                               const Label& current_toolchain,
+                               LabelTargetVector* dest,
+                               Err* err) {
+  return ListValueAppender(
+      value, dest, err,
+      ExternalDepPtrResolver<Target>(build_settings, current_dir, current_toolchain));
 }
 
 bool ExtractListOfUniqueLabels(const BuildSettings* build_settings,

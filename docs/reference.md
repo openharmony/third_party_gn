@@ -120,6 +120,7 @@
     *   [defines: [string list] C preprocessor defines.](#var_defines)
     *   [depfile: [string] File name for input dependencies for actions.](#var_depfile)
     *   [deps: [label list] Private linked dependencies.](#var_deps)
+    *   [external_deps: [label list] Declare external dependencies for OpenHarmony component.](#var_external_deps)
     *   [externs: [scope] Set of Rust crate-dependency pairs.](#var_externs)
     *   [framework_dirs: [directory list] Additional framework search directories.](#var_framework_dirs)
     *   [frameworks: [name list] Name of frameworks that must be linked.](#var_frameworks)
@@ -147,6 +148,7 @@
     *   [public: [file list] Declare public header files for a target.](#var_public)
     *   [public_configs: [label list] Configs applied to dependents.](#var_public_configs)
     *   [public_deps: [label list] Declare public dependencies.](#var_public_deps)
+    *   [public_external_deps: [label list] Declare public external dependencies for OpenHarmony component.](#var_public_external_deps)
     *   [rebase: [boolean] Rebase collected metadata as files.](#var_rebase)
     *   [response_file_contents: [string list] Contents of .rsp file for actions.](#var_response_file_contents)
     *   [script: [file name] Script file for actions.](#var_script)
@@ -5463,6 +5465,26 @@
 
   See also "public_deps".
 ```
+### <a name="var_external_deps"></a>**external_deps**: Declare external dependencies for OpenHarmony component.
+
+```
+  External dependencies are like private dependencies (see "gn help deps") but
+  expressed in the form of: component_name:innerapi_name.
+    * component and innerapi are defined by OpenHarmony bundle.json.
+  With external_deps, deps can be added without absolute path.
+
+  This variable is enabled by setting "ohos_components_support" in .gn file (see "gn help dotfile").
+```
+
+#### **Example**
+
+```
+  # This target "a" can include libinitapi from "init" component
+  executable("a") {
+    deps = [ ":b" ]
+    external_deps = [ "init:libinitapi" ]
+  }
+```
 ### <a name="var_externs"></a>**externs**: [scope] Set of Rust crate-dependency pairs.
 
 ```
@@ -6351,6 +6373,28 @@
     public_deps = [ ":c" ]
   }
 ```
+### <a name="var_public_external_deps"></a>**public_external_deps**: Declare public external dependencies for OpenHarmony component.
+
+```
+  Public external dependencies (public_external_deps) are like external_deps but additionally express that
+  the current target exposes the listed external_deps as part of its public API.
+
+  This variable is enabled by setting "ohos_components_support" in .gn file (see "gn help dotfile").
+```
+
+#### **Example**
+
+```
+  # Target "a" will include libinitapi from "init" component by deps "b":
+  executable("a") {
+    deps = [ ":b" ]
+  }
+
+  shared_library("b") {
+    deps = [ ":b" ]
+    public_external_deps = [ "init:libinitapi" ]
+  }
+```
 ### <a name="var_rebase"></a>**rebase**: Rebase collected metadata as files.
 
 ```
@@ -6853,6 +6897,21 @@
       When set specifies the minimum required version of Ninja. The default
       required version is 1.7.2. Specifying a higher version might enable the
       use of some of newer features that can make the build more efficient.
+
+  ohos_components_support [optional]
+      This parameter enable support for OpenHarmony components.
+      When enabled, gn will load components information from "build_configs/"
+      directory in the root_out_directory.
+
+      The following files will be loaded:
+        out/build_configs/parts_info/inner_kits_info.json (required):
+          Required InnerAPI information file for each OHOS component.
+        out/build_configs/component_override_map.json (optional):
+          Optional overrided component maps file.
+
+      For OpenHarmony system build, this value must be enabled to support
+      external_deps (see "gn help external_deps") and public_external_deps
+      (see "gn help public_external_deps").
 ```
 
 #### **Example .gn file contents**

@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "gn/settings.h"
+#include "gn/build_settings.h"
 
 Item::Item(const Settings* settings,
            const Label& label,
@@ -13,7 +14,9 @@ Item::Item(const Settings* settings,
     : settings_(settings),
       label_(label),
       build_dependency_files_(build_dependency_files),
-      defined_from_(nullptr) {}
+      defined_from_(nullptr) {
+        component = settings->build_settings()->GetOhosComponent(label.GetUserVisibleName(false));
+      }
 
 Item::~Item() = default;
 

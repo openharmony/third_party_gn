@@ -159,7 +159,10 @@ void NinjaBinaryTargetWriter::ClassifyDependency(
   if (can_link_libs && dep->builds_swift_module())
     classified_deps->swiftmodule_deps.push_back(dep);
 
-  if (target_->source_types_used().RustSourceUsed() &&
+  if (dep->output_type() == Target::COPY_FILES &&
+      dep->IsLinkable()) {
+    classified_deps->linkable_deps.push_back(dep);
+  } else if (target_->source_types_used().RustSourceUsed() &&
       (target_->output_type() == Target::RUST_LIBRARY ||
        target_->output_type() == Target::STATIC_LIBRARY) &&
       dep->IsLinkable()) {
