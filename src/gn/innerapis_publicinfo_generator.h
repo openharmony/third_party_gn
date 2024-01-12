@@ -17,8 +17,7 @@
 #include "gn/target.h"
 #include "gn/value.h"
 
-struct PublicConfigInfoParams
-{
+struct PublicConfigInfoParams {
     const Target *target;
     std::string label;
     Err *err;

@@ -166,7 +166,7 @@ class Target : public Item {
 
     // Whether this copy target is linkable.
     bool copy_linkable_file() const { return copy_linkable_file_; }
-    void set_copy_linkable_file(bool linkable) 
+    void set_copy_linkable_file(bool linkable)
     {
         DCHECK_EQ(COPY_FILES, output_type_);
         copy_linkable_file_ = linkable;

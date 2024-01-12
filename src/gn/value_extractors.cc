@@ -39,7 +39,7 @@ template <typename T, class Converter>
 bool ListValueAppender(const Value& value,
                        std::vector<T>* dest,
                        Err* err,
-                       const Converter& converter) 
+                       const Converter& converter)
 {
   if (!value.VerifyTypeIs(Value::LIST, err))
     return false;
@@ -221,7 +221,7 @@ struct ExternalDepPtrResolver {
       : build_settings(build_settings_in),
         current_dir(current_dir_in),
         current_toolchain(current_toolchain_in) {}
-  bool operator()(const Value& v, LabelPtrPair<T>* out, Err* err) const 
+  bool operator()(const Value& v, LabelPtrPair<T>* out, Err* err) const
   {
     if (!v.VerifyTypeIs(Value::STRING, err)) {
       return false;

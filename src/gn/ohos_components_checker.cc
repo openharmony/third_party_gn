@@ -62,7 +62,8 @@ static void CreateScanOutDir(const std::string &dir)
     return;
 }
 
-static void RemoveScanOutDir(const std::string& dir) {
+static void RemoveScanOutDir(const std::string& dir)
+{
     if (access(dir.c_str(), F_OK) == -1) {
         return;
     }
@@ -291,8 +292,8 @@ bool OhosComponentChecker::InterceptInnerApiVisibilityDenied(const Item *item, c
     return false;
 }
 
-bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode* function, const std::string label, const std::string deps,
-    Err *err) const
+bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode* function, const std::string label,
+    const std::string deps, Err *err) const
 {
     if (auto res = import_other_.find(label); res != import_other_.end()) {
         std::string deps_str(deps);
@@ -511,7 +512,8 @@ bool OhosComponentChecker::CheckTargetAbsoluteDepsOther(const Item *item, const 
     if (from_component == nullptr) {
         return true;
     }
-    GenerateScanList("target_absolute_deps_other.list", from_component->subsystem(), from_component->name(), label, deps);
+    GenerateScanList("target_absolute_deps_other.list",
+        from_component->subsystem(), from_component->name(), label, deps);
     return true;
 }
 

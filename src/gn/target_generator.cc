@@ -448,7 +448,7 @@ bool TargetGenerator::FillGenericDeps(const char* var_name,
   return !err_->has_error();
 }
 
-bool TargetGenerator::FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest) 
+bool TargetGenerator::FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest)
 {
   const Value* value = scope_->GetValue(var_name, true);
   if (value) {

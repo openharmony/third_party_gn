@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 #include "gn/ohos_components.h"
 
+#include <cstring>
 #include <iostream>
 #include <map>
-#include <string.h>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -26,9 +26,9 @@
  * Each component has zero or more innerapis
  */
 
-static const std::string kEmptyInnerApi;
+static const std::string EMPTY_INNERAPI;
 
-static const int kPathPrefixLen = 2;
+static const int PATH_PREFIX_LEN = 2;
 
 OhosComponent::OhosComponent() = default;
 
@@ -36,7 +36,7 @@ OhosComponent::OhosComponent(const char *name, const char *subsystem, const char
 {
     name_ = std::string(name);
     subsystem_ = std::string(subsystem);
-    if (strncmp(path, "//", kPathPrefixLen) == 0) {
+    if (strncmp(path, "//", PATH_PREFIX_LEN) == 0) {
         path_ = std::string(path);
     } else {
         path_ = "//" + std::string(path);
@@ -55,7 +55,7 @@ const std::string &OhosComponent::getInnerApi(const std::string &innerapi) const
     if (auto res = innerapi_names_.find(innerapi); res != innerapi_names_.end()) {
         return res->second;
     }
-    return kEmptyInnerApi;
+    return EMPTY_INNERAPI;
 }
 
 bool OhosComponent::isInnerApi(const std::string &label) const
@@ -163,8 +163,8 @@ const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label
         return nullptr;
     }
     // Skip leading //
-    if (strncmp(label, "//", kPathPrefixLen) == 0) {
-        label += kPathPrefixLen;
+    if (strncmp(label, "//", PATH_PREFIX_LEN) == 0) {
+        label += PATH_PREFIX_LEN;
     }
 
     size_t len;
@@ -216,7 +216,7 @@ const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label
 void OhosComponentsImpl::addComponentToTree(struct OhosComponentTree *current, OhosComponent *component)
 {
     size_t len;
-    const char *path = component->path().c_str() + kPathPrefixLen;
+    const char *path = component->path().c_str() + PATH_PREFIX_LEN;
     const char *sep;
 
     while (path[0] != '\0') {
@@ -259,21 +259,10 @@ void OhosComponentsImpl::setupComponentsTree()
     }
 }
 
-bool OhosComponentsImpl::LoadOhosInnerApis_(const std::string innerapi_content, std::string &err_msg_out)
+void OhosComponentsImpl::LoadInnerApi(const base::DictionaryValue *innerapis)
 {
-    const base::DictionaryValue *innerapis_dict;
-
-    std::unique_ptr<base::Value> innerapis = base::JSONReader::ReadAndReturnError(innerapi_content,
-        base::JSONParserOptions::JSON_PARSE_RFC, nullptr, &err_msg_out, nullptr, nullptr);
-    if (!innerapis) {
-        return false;
-    }
-    if (!innerapis->GetAsDictionary(&innerapis_dict)) {
-        return false;
-    }
-
     OhosComponent *component;
-    for (const auto kv : innerapis_dict->DictItems()) {
+    for (const auto kv : innerapis->DictItems()) {
         for (const auto inner : kv.second.DictItems()) {
             component = (OhosComponent *)GetComponentByName(kv.first);
             if (!component) {
@@ -293,7 +282,21 @@ bool OhosComponentsImpl::LoadOhosInnerApis_(const std::string innerapi_content, 
             }
         }
     }
+}
 
+bool OhosComponentsImpl::LoadOhosInnerApis_(const std::string innerapi_content, std::string &err_msg_out)
+{
+    const base::DictionaryValue *innerapis_dict;
+
+    std::unique_ptr<base::Value> innerapis = base::JSONReader::ReadAndReturnError(innerapi_content,
+        base::JSONParserOptions::JSON_PARSE_RFC, nullptr, &err_msg_out, nullptr, nullptr);
+    if (!innerapis) {
+        return false;
+    }
+    if (!innerapis->GetAsDictionary(&innerapis_dict)) {
+        return false;
+    }
+    LoadInnerApi(innerapis_dict);
     return true;
 }
 
@@ -301,51 +304,45 @@ bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const 
 {
     const char *paths_file = "parts_info/parts_path_info.json";
     std::string paths_content;
-    bool ret = ReadBuildConfigFile(build_dir, paths_file, paths_content);
-    if (!ret) {
+    if (!ReadBuildConfigFile(build_dir, paths_file, paths_content)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
             "OpenHarmony build config file (" +
             std::string(paths_file) + ") does not exists.\n");
-        return ret;
+        return false;
     }
     const char *subsystems_file = "parts_info/part_subsystem.json";
     std::string subsystems_content;
-    ret = ReadBuildConfigFile(build_dir, subsystems_file, subsystems_content);
-    if (!ret) {
+    if (!ReadBuildConfigFile(build_dir, subsystems_file, subsystems_content)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
             "OpenHarmony build config file (" +
             std::string(subsystems_file) + ") does not exists.\n");
-        return ret;
+        return false;
     }
     const char *innerapis_file = "parts_info/inner_kits_info.json";
     std::string innerapis_content;
-    ret = ReadBuildConfigFile(build_dir, innerapis_file, innerapis_content);
-    if (!ret) {
+    if (!ReadBuildConfigFile(build_dir, innerapis_file, innerapis_content)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
             "OpenHarmony build config file (" +
             std::string(innerapis_file) + ") does not exists.\n");
-        return ret;
+        return false;
     }
     const char *override_file = "component_override_map.json";
     std::string override_map;
-    ret = ReadBuildConfigFile(build_dir, override_file, override_map);
-    if (!ret) {
-        override_map = kEmptyInnerApi;
+    if (!ReadBuildConfigFile(build_dir, override_file, override_map)) {
+        override_map = EMPTY_INNERAPI;
     }
     std::string err_msg_out;
-    ret = LoadComponentSubsystemAndPaths(paths_content, override_map, subsystems_content, err_msg_out);
-    if (!ret) {
+    if (!LoadComponentSubsystemAndPaths(paths_content, override_map, subsystems_content, err_msg_out)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
             "OpenHarmony build config file parsing failed:\n" +
             err_msg_out + "\n");
-        return ret;
+        return false;
     }
-    ret = LoadOhosInnerApis_(innerapis_content, err_msg_out);
-    if (!ret) {
+    if (!LoadOhosInnerApis_(innerapis_content, err_msg_out)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
             "OpenHarmony build config file " +
             std::string(innerapis_file) + " parsing failed:\n" + err_msg_out + "\n");
-        return ret;
+        return false;
     }
     return true;
 }
@@ -376,7 +373,7 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
     }
     std::string innerapi_name = str_val.substr(sep + 1);
     label = component->getInnerApi(innerapi_name);
-    if (label == kEmptyInnerApi) {
+    if (label == EMPTY_INNERAPI) {
         *err = Err(external_dep,
             "OHOS innerapi: (" + innerapi_name + ") not found for component (" + component_name + ").");
         return false;

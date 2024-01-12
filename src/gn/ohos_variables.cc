@@ -15,7 +15,7 @@ const char kCopyLinkableFile_Help[] =
     R"(copy_linkable_file: [boolean] Copy a linkable static or shared library.
 
   A copy target normally doesn't export configs for targets that depend on it.
-  In some cases, a copy target is a linkable target, which means it is a static 
+  In some cases, a copy target is a linkable target, which means it is a static
   or shared library with some public_configs to be exported.
 
   In this case, we can set copy_linkable_file to export configs.

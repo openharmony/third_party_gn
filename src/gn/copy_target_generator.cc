@@ -19,7 +19,7 @@ CopyTargetGenerator::CopyTargetGenerator(Target* target,
 
 CopyTargetGenerator::~CopyTargetGenerator() = default;
 
-bool CopyTargetGenerator::FillCopyLinkableFile() 
+bool CopyTargetGenerator::FillCopyLinkableFile()
 {
     const Value* value = scope_->GetValue(variables::kCopyLinkableFile, true);
     if (!value)

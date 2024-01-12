@@ -5,27 +5,27 @@
 #include "gn/ohos_components.h"
 #include "gn/ohos_components_impl.h"
 
+#include <cstdint>
 #include <iostream>
-#include <stdint.h>
 #include <memory>
 #include <utility>
 
 #include "gn/test_with_scope.h"
 #include "util/test/test.h"
 
-std::string pathLoadComponentSubsystemAndPaths = "{"
+static const std::string COMPONENT_PATHS = "{"
             "\"foo\": \"components/foo\","
             "\"bar\": \"components/bar\","
             "\"baz\": \"components/baz\""
         "}";
 
-std::string subsystemLoadComponentSubsystemAndPaths = "{"
+static const std::string SUBSYSTEM_PATHS = "{"
             "\"foo\": \"samples\","
             "\"bar\": \"samples\","
             "\"baz\": \"samples\""
         "}";
 
-std::string strLoadOhosInnerApis = "{"
+static const std::string STR_INNERAPIS = "{"
         "\"foo\": {"
           "\"libfoo\": {"
             "\"label\": \"//components/foo/interfaces/innerapis/libfoo:libfoo\""
@@ -79,13 +79,13 @@ TEST(OhosComponent, ComponentInnerApi) {
 TEST(OhosComponentsImpl, LoadComponentSubsystemAndPaths) {
     OhosComponentsImpl *mgr = new OhosComponentsImpl();
     std::string errStr;
-    bool ret = mgr->LoadComponentSubsystemAndPaths(pathLoadComponentSubsystemAndPaths,
+    bool ret = mgr->LoadComponentSubsystemAndPaths(COMPONENT_PATHS,
                                                    "",
-                                                   subsystemLoadComponentSubsystemAndPaths,
+                                                   SUBSYSTEM_PATHS,
                                                    errStr);
     ASSERT_TRUE(ret);
 
-    ret = mgr->LoadOhosInnerApis_(strLoadOhosInnerApis, errStr);
+    ret = mgr->LoadOhosInnerApis_(STR_INNERAPIS, errStr);
     ASSERT_TRUE(ret);
 
     const OhosComponent *component;

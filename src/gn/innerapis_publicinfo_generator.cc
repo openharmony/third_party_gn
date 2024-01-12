@@ -269,8 +269,8 @@ std::string GetPublicHeadersInfo(const Target *target)
     return info;
 }
 
-std::string GetPublicDepsInfo(const Target *target, const std::string &labelString, const OhosComponentChecker *checker,
-    Err *err)
+std::string GetPublicDepsInfo(const Target *target, const std::string &labelString,
+    const OhosComponentChecker *checker, Err *err)
 {
     std::string info = "";
     const LabelTargetVector deps = target->public_deps();
@@ -284,10 +284,11 @@ std::string GetPublicDepsInfo(const Target *target, const std::string &labelStri
             first = false;
             std::string dep_str = dep.label.GetUserVisibleName(false);
             info += "\"" + dep_str + "\"";
-            if (checker != nullptr) {
-                if (!checker->CheckInnerApiPublicDepsInner(target, labelString, dep_str, err)) {
-                    return "";
-                }
+            if (checker == nullptr) {
+                continue;
+            }
+            if (!checker->CheckInnerApiPublicDepsInner(target, labelString, dep_str, err)) {
+                return "";
             }
         }
         info += "\n  ]";
@@ -298,8 +299,8 @@ std::string GetPublicDepsInfo(const Target *target, const std::string &labelStri
 std::string GetOutNameAndTypeInfo(const Scope *scope, const std::string &targetName, const std::string &type)
 {
     std::string info = "";
-    const std::string out_name = GetOutName(scope, targetName, type);
-    info += ",\n  \"out_name\":\"" + out_name + "\"";
+    const std::string name = GetOutName(scope, targetName, type);
+    info += ",\n  \"out_name\":\"" + name + "\"";
     info += ",\n  \"type\":\"" + type + "\"";
     info += "\n}\n";
     return info;
@@ -320,7 +321,6 @@ void InnerApiPublicInfoGenerator::GeneratedInnerapiPublicInfo(Target *target, La
     info += GetPublicConfigsInfo(target, labelString, scope, checker, err);
     info += GetAllDependentConfigsInfo(target, labelString, scope, checker, err);
     info += GetPrivateConfigsInfo(target, labelString, scope, checker, err);
-
 
     if (checker != nullptr) {
         if (!TraverIncludeDirs(checker, target, scope, labelString, err)) {

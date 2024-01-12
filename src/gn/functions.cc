@@ -670,7 +670,7 @@ Value RunImport(Scope* scope,
   }
   const OhosComponentChecker *checker = OhosComponentChecker::getInstance();
   if (checker != nullptr) {
-      checker->CheckImportOther(function, scope->settings()->build_settings(), 
+      checker->CheckImportOther(function, scope->settings()->build_settings(),
                                 input_dir.value(), import_file.value(), err);
   }
   return Value();

@@ -54,7 +54,7 @@ class OhosComponentsImpl {
 public:
     OhosComponentsImpl();
 
-    bool LoadOhosComponents(const std::string &build_dir, 
+    bool LoadOhosComponents(const std::string &build_dir,
                             const Value *enable, Err *err);
 
     bool GetExternalDepsLabel(const Value &external_dep, std::string &label, Err *err) const;
@@ -63,25 +63,26 @@ public:
     const OhosComponent *GetComponentByName(const std::string &component_name) const;
 
 private:
-    bool ReadBuildConfigFile(const std::string &build_dir, 
+    bool ReadBuildConfigFile(const std::string &build_dir,
                              const char *subfile, std::string &content);
 
     std::map<std::string, OhosComponent *> components_;
 
     struct OhosComponentTree *pathTree = nullptr;
     void setupComponentsTree();
-    const struct OhosComponentTree *findChildByPath(const struct OhosComponentTree *current, 
-        const char *path,
-        size_t len);
+    const struct OhosComponentTree *findChildByPath(const struct OhosComponentTree *current,
+                                                    const char *path, size_t len);
     void addComponentToTree(struct OhosComponentTree *current, OhosComponent *component);
+
+    void LoadInnerApi(const base::DictionaryValue *innerapis);
 
     // For unittest
 public:
     const OhosComponent *matchComponentByLabel(const char *label);
 
-    bool LoadComponentSubsystemAndPaths(const std::string &paths, 
+    bool LoadComponentSubsystemAndPaths(const std::string &paths,
                                         const std::string &override_map,
-                                        const std::string &subsystems, 
+                                        const std::string &subsystems,
                                         std::string &err_msg_out);
 
     bool LoadOhosInnerApis_(const std::string innerapi_content, std::string &err_msg_out);

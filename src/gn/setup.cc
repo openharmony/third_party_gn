@@ -401,7 +401,7 @@ bool Setup::DoSetup(const std::string& build_dir,
   return true;
 }
 
-bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err) 
+bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
 {
   // Load OpenHarmony system components definition file.
   const Value *support =
