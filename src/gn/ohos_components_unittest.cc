@@ -14,34 +14,31 @@
 #include "util/test/test.h"
 
 static const std::string COMPONENT_PATHS = "{"
-            "\"foo\": \"components/foo\","
-            "\"bar\": \"components/bar\","
-            "\"baz\": \"components/baz\""
+            "\"foo\": {"
+               "\"subsystem\": \"samples\","
+               "\"path\": \"components/foo\","
+               "\"innerapis\": {"
+                 "\"label\": \"//components/foo/interfaces/innerapis/libfoo:libfoo\","
+                 "\"name\": \"libfoo\""
+                "}"
+            "},"
+            "\"bar\": {"
+               "\"subsystem\": \"samples\","
+               "\"path\": \"components/bar\","
+               "\"innerapis\": {"
+                 "\"label\": \"//components/bar/interfaces/innerapis/libbar:libbar\","
+                 "\"name\": \"libbar\""
+                "}"
+            "},"
+           "\"baz\": {"
+               "\"subsystem\": \"samples\","
+               "\"path\": \"components/baz\","
+               "\"innerapis\": {"
+                 "\"label\": \"//components/baz/interfaces/innerapis/libbaz:libbaz\","
+                 "\"name\": \"libbaz\""
+                "}"
+            "}"
         "}";
-
-static const std::string SUBSYSTEM_PATHS = "{"
-            "\"foo\": \"samples\","
-            "\"bar\": \"samples\","
-            "\"baz\": \"samples\""
-        "}";
-
-static const std::string STR_INNERAPIS = "{"
-        "\"foo\": {"
-          "\"libfoo\": {"
-            "\"label\": \"//components/foo/interfaces/innerapis/libfoo:libfoo\""
-          "}"
-        "},"
-        "\"bar\": {"
-          "\"libbar\": {"
-            "\"label\": \"//components/bar/interfaces/innerapis/libbar:libbar\""
-          "}"
-        "},"
-        "\"baz\": {"
-          "\"libbaz\": {"
-            "\"label\": \"//components/baz/interfaces/innerapis/libbaz:libbaz\""
-          "}"
-        "}"
-    "}";
 
 TEST(OhosComponent, ComponentInnerApi) {
     OhosComponent com("foo", "samples", "components/foo");
@@ -79,17 +76,10 @@ TEST(OhosComponent, ComponentInnerApi) {
 TEST(OhosComponentsImpl, LoadComponentSubsystemAndPaths) {
     OhosComponentsImpl *mgr = new OhosComponentsImpl();
     std::string errStr;
-    bool ret = mgr->LoadComponentSubsystemAndPaths(COMPONENT_PATHS,
-                                                   "",
-                                                   SUBSYSTEM_PATHS,
-                                                   errStr);
-    ASSERT_TRUE(ret);
-
-    ret = mgr->LoadOhosInnerApis_(STR_INNERAPIS, errStr);
+    bool ret = mgr->LoadComponentInfo(COMPONENT_PATHS, errStr);
     ASSERT_TRUE(ret);
 
     const OhosComponent *component;
-
     component = mgr->matchComponentByLabel("components/foo");
     EXPECT_EQ("foo", component->name());
     component = mgr->matchComponentByLabel("//components/foo");

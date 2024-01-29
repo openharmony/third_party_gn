@@ -25,8 +25,6 @@
 #include "gn/target.h"
 #include "gn/value.h"
 
-namespace fs = std::filesystem;
-
 InnerApiPublicInfoGenerator *InnerApiPublicInfoGenerator::instance_ = nullptr;
 
 static bool StartWith(const std::string &str, const std::string prefix)
@@ -40,27 +38,6 @@ static bool IsFileExists(const std::string &path)
         return true;
     }
     return false;
-}
-
-static void CreateDirectory(const std::string &path)
-{
-    int status = mkdir(path.c_str(), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH);
-    if (status == -1 && errno != EEXIST) {
-        return;
-    }
-    size_t found = path.find('/');
-    while (found != std::string::npos) {
-        std::string subPath = path.substr(0, found + 1);
-        struct stat info;
-        if (!stat(subPath.c_str(), &info)) {
-            if ((info.st_mode & S_IFDIR) == 0) {
-                break;
-            }
-        } else {
-            CreateDirectory(subPath);
-        }
-        found = path.find('/', found + 1);
-    }
 }
 
 static std::string GetOutName(const Scope *scope, std::string targetName, const std::string type)
@@ -302,6 +279,15 @@ std::string GetOutNameAndTypeInfo(const Scope *scope, const std::string &targetN
     const std::string name = GetOutName(scope, targetName, type);
     info += ",\n  \"out_name\":\"" + name + "\"";
     info += ",\n  \"type\":\"" + type + "\"";
+    return info;
+}
+
+std::string GetComponentInfo(const std::string &subsystem, const std::string &component, const std::string &path)
+{
+    std::string info = "";
+    info += ",\n  \"subsystem\":\"" + subsystem + "\"";
+    info += ",\n  \"component\":\"" + component + "\"";
+    info += ",\n  \"path\":\"" + path + "\"";
     info += "\n}\n";
     return info;
 }
@@ -343,10 +329,11 @@ void InnerApiPublicInfoGenerator::GeneratedInnerapiPublicInfo(Target *target, La
     int pos = labelString.find(":");
     std::string targetName = labelString.substr(pos + 1, labelString.length() - 1);
     info += GetOutNameAndTypeInfo(scope, targetName, type);
+    info += GetComponentInfo(component->subsystem(), component->name(), component->path());
 
     const std::string dir = build_dir_ + "/" + component->subsystem() + "/" + component->name() + "/publicinfo";
-    fs::path path(dir);
-    fs::create_directories(path);
+    base::FilePath path(dir);
+    base::CreateDirectory(path);
     std::ofstream publicfile;
     const std::string json_path = dir + "/" + targetName + ".json";
     if (IsFileExists(json_path)) {
