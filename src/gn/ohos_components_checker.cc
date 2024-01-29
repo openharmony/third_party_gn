@@ -25,8 +25,6 @@
 #include "gn/target.h"
 #include "gn/value.h"
 
-namespace fs = std::filesystem;
-
 static const std::string SCAN_RESULT_PATH = "scan_out";
 static const std::string WHITELIST_PATH = "build/component_compilation_whitelist.json";
 static std::vector<std::string> all_deps_config_;
@@ -37,6 +35,7 @@ static std::vector<std::string> innerapi_not_declare_;
 static std::map<std::string, std::vector<std::string>> includes_absolute_deps_other_;
 static std::map<std::string, std::vector<std::string>> target_absolute_deps_other_;
 static std::map<std::string, std::vector<std::string>> import_other_;
+static std::map<std::string, std::vector<std::string>> deps_not_lib_;
 
 OhosComponentChecker *OhosComponentChecker::instance_ = nullptr;
 
@@ -57,8 +56,8 @@ static bool StartWith(const std::string &str, const std::string prefix)
 
 static void CreateScanOutDir(const std::string &dir)
 {
-    fs::path path(dir);
-    fs::create_directories(path);
+    base::FilePath path(dir);
+    base::CreateDirectory(path);
     return;
 }
 
@@ -67,19 +66,14 @@ static void RemoveScanOutDir(const std::string& dir)
     if (access(dir.c_str(), F_OK) == -1) {
         return;
     }
-    for (auto& entry : fs::directory_iterator(dir)) {
-        if (entry.is_regular_file()) {
-            fs::remove(entry);
-        } else if (entry.is_directory()) {
-            RemoveScanOutDir(entry.path().string());
-        }
-    }
-    fs::remove(dir);
+    base::FilePath path(dir);
+    base::DeleteFile(path, true);
+    return;
 }
 
-static bool ReadBuildConfigFile(std::string &content)
+static bool ReadBuildConfigFile(base::FilePath path, std::string &content)
 {
-    if (!base::ReadFileToString(base::FilePath(WHITELIST_PATH), &content)) {
+    if (!base::ReadFileToString(path, &content)) {
         return false;
     }
     return true;
@@ -149,6 +143,15 @@ static void LoadImportOtherWhitelist(const base::Value &value)
     }
 }
 
+static void LoadDepsNotLibWhitelist(const base::Value &value)
+{
+    for (auto info : value.DictItems()) {
+        for (const base::Value &value_tmp : info.second.GetList()) {
+            deps_not_lib_[info.first].push_back(value_tmp.GetString());
+        }
+    }
+}
+
 static std::map<std::string, std::function<void(const base::Value &value)>> whitelist_map_ = {
     { "all_dependent_configs", LoadAllDepsConfigWhitelist },
     { "includes_over_range", LoadIncludesOverRangeWhitelist },
@@ -157,13 +160,14 @@ static std::map<std::string, std::function<void(const base::Value &value)>> whit
     { "innerapi_public_deps_inner", LoadInnerApiPublicDepsInnerWhitelist },
     { "includes_absolute_deps_other", LoadIncludesAbsoluteDepsOtherWhitelist },
     { "target_absolute_deps_other", LoadAbsoluteDepsOtherWhitelist },
-    { "import_other", LoadImportOtherWhitelist }
+    { "import_other", LoadImportOtherWhitelist },
+    { "deps_not_lib", LoadDepsNotLibWhitelist }
 };
 
 static void LoadWhitelist()
 {
     std::string whitelistContent;
-    if (!ReadBuildConfigFile(whitelistContent)) {
+    if (!ReadBuildConfigFile(base::FilePath(WHITELIST_PATH), whitelistContent)) {
         return;
     }
     const base::DictionaryValue *whitelist_dict;
@@ -232,6 +236,21 @@ bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::
     }
     *err =
         Err(item->defined_from(), "InnerApi is not a library type.", "The item " + label + " is not a library type.");
+    return false;
+}
+
+bool OhosComponentChecker::InterceptDepsNotLib(const Item *item, const std::string label,
+    const std::string deps, Err *err) const
+{
+    if (auto res = deps_not_lib_.find(label); res != deps_not_lib_.end()) {
+        std::string deps_str(deps);
+        auto res_second = std::find(res->second.begin(), res->second.end(), Trim(deps_str));
+        if (res_second != res->second.end()) {
+            return true;
+        }
+    }
+    *err = Err(item->defined_from(), "Depend a non-lib target.",
+        "The item " + label + " cannot depend on a non-lib target " + deps);
     return false;
 }
 
@@ -395,7 +414,7 @@ bool OhosComponentChecker::CheckInnerApiPublicDepsInner(const Target *target, co
 }
 
 bool OhosComponentChecker::CheckInnerApiNotLib(const Item *item, const OhosComponent *component,
-    const std::string label, Err *err) const
+    const std::string label, const std::string deps, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || item == nullptr || item->AsTarget() == nullptr ||
         (ignoreTest_ && item->testonly()) || component == nullptr) {
@@ -408,9 +427,12 @@ bool OhosComponentChecker::CheckInnerApiNotLib(const Item *item, const OhosCompo
     }
 
     if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
-        return InterceptInnerApiNotLib(item, label, err);
+        return InterceptDepsNotLib(item, label, deps, err) && InterceptInnerApiNotLib(item, deps, err);
     }
-    GenerateScanList("innerapi_not_lib.list", component->subsystem(), component->name(), label, "");
+
+    std::string type_str(Target::GetStringForOutputType(type));
+    GenerateScanList("innerapi_not_lib.list", component->subsystem(), component->name(), deps, type_str);
+    GenerateScanList("deps_not_lib.list", component->subsystem(), component->name(), label, deps);
     return true;
 }
 
@@ -494,9 +516,6 @@ bool OhosComponentChecker::CheckTargetAbsoluteDepsOther(const Item *item, const 
     const std::string label, const std::string deps, bool is_external_deps, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || component == nullptr || item == nullptr || (ignoreTest_ && item->testonly())) {
-        return true;
-    }
-    if (!component->isInnerApi(deps)) {
         return true;
     }
 

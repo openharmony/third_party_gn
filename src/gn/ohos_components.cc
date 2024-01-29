@@ -17,6 +17,7 @@
 #include "gn/innerapis_publicinfo_generator.h"
 #include "gn/ohos_components_checker.h"
 #include "gn/ohos_components_impl.h"
+#include "gn/ohos_components_mapping.h"
 
 /**
  * Ohos Component API
@@ -45,8 +46,18 @@ OhosComponent::OhosComponent(const char *name, const char *subsystem, const char
 
 void OhosComponent::addInnerApi(const std::string &name, const std::string &label)
 {
-    innerapi_names_[name] = label;
-    innerapi_labels_[label] = name;
+    std::string la = label;
+    size_t pos = label.find(":");
+    if (pos > 0) {
+        if ((label[pos - 1]) == '/') { // some are like this : "//components/foo/libfoo/:libfoo"
+            unsigned long indexToRemove = pos - 1;
+            if (indexToRemove >= 0 && indexToRemove <= la.length()) {
+                la.erase(la.begin() + indexToRemove);
+            }
+        }
+    }
+    innerapi_names_[name] = la;
+    innerapi_labels_[la] = name;
 }
 
 
@@ -97,38 +108,31 @@ bool OhosComponentsImpl::ReadBuildConfigFile(const std::string &build_dir, const
     return true;
 }
 
-bool OhosComponentsImpl::LoadComponentSubsystemAndPaths(const std::string &paths, const std::string &override_map,
-    const std::string &subsystems, std::string &err_msg_out)
+bool OhosComponentsImpl::LoadComponentInfo(const std::string &components_content, std::string &err_msg_out)
 {
-    const base::DictionaryValue *paths_dict;
-
-    std::unique_ptr<base::Value> paths_value = base::JSONReader::ReadAndReturnError(paths,
+    const base::DictionaryValue *components_dict;
+    std::unique_ptr<base::Value> components_value = base::JSONReader::ReadAndReturnError(components_content,
         base::JSONParserOptions::JSON_PARSE_RFC, nullptr, &err_msg_out, nullptr, nullptr);
-    if (!paths_value) {
+    if (!components_value) {
         return false;
     }
-    if (!paths_value->GetAsDictionary(&paths_dict)) {
-        return false;
-    }
-
-    const base::DictionaryValue *subsystems_dict;
-    std::unique_ptr<base::Value> subsystems_value = base::JSONReader::ReadAndReturnError(subsystems,
-        base::JSONParserOptions::JSON_PARSE_RFC, nullptr, &err_msg_out, nullptr, nullptr);
-    if (!subsystems_value) {
-        return false;
-    }
-    if (!subsystems_value->GetAsDictionary(&subsystems_dict)) {
+    if (!components_value->GetAsDictionary(&components_dict)) {
         return false;
     }
 
-    const base::Value *subsystem;
-    for (const auto com : paths_dict->DictItems()) {
-        subsystem = subsystems_dict->FindKey(com.first);
-        if (!subsystem) {
+    for (const auto com : components_dict->DictItems()) {
+        const base::Value *subsystem = com.second.FindKey("subsystem");
+        const base::Value *path = com.second.FindKey("path");
+        if (!subsystem || !path) {
             continue;
         }
         components_[com.first] =
-            new OhosComponent(com.first.c_str(), subsystem->GetString().c_str(), com.second.GetString().c_str());
+            new OhosComponent(com.first.c_str(), subsystem->GetString().c_str(), path->GetString().c_str());
+        const base::Value *innerapis = com.second.FindKey("innerapis");
+        if (!innerapis) {
+            continue;
+        }
+        LoadInnerApi(com.first, innerapis->GetList());
     }
     setupComponentsTree();
     return true;
@@ -259,89 +263,43 @@ void OhosComponentsImpl::setupComponentsTree()
     }
 }
 
-void OhosComponentsImpl::LoadInnerApi(const base::DictionaryValue *innerapis)
+void OhosComponentsImpl::LoadInnerApi(const std::string &component_name, const std::vector<base::Value> &innerapis)
 {
-    OhosComponent *component;
-    for (const auto kv : innerapis->DictItems()) {
-        for (const auto inner : kv.second.DictItems()) {
-            component = (OhosComponent *)GetComponentByName(kv.first);
-            if (!component) {
-                break;
-            }
-            for (const auto info : inner.second.DictItems()) {
-                if (info.first == "label") {
-                    component->addInnerApi(inner.first, info.second.GetString());
-                    break;
-                }
-            }
-            for (const auto info : inner.second.DictItems()) {
-                if (info.first == "visibility") {
-                    component->addInnerApiVisibility(inner.first, info.second.GetList());
-                    break;
-                }
-            }
+    OhosComponent *component = (OhosComponent *)GetComponentByName(component_name);
+    if (!component) {
+        return;
+    }
+    for (const base::Value &kv : innerapis) {
+        const base::Value *label = kv.FindKey("label");
+        const base::Value *name = kv.FindKey("name");
+       
+        if (!label || !name) {
+            continue;
         }
+        component->addInnerApi(name->GetString(), label->GetString());
+        const base::Value *visibility = kv.FindKey("visibility");
+        if (!visibility) {
+            continue;
+        }
+        component->addInnerApiVisibility(name->GetString(), visibility->GetList());
     }
-}
-
-bool OhosComponentsImpl::LoadOhosInnerApis_(const std::string innerapi_content, std::string &err_msg_out)
-{
-    const base::DictionaryValue *innerapis_dict;
-
-    std::unique_ptr<base::Value> innerapis = base::JSONReader::ReadAndReturnError(innerapi_content,
-        base::JSONParserOptions::JSON_PARSE_RFC, nullptr, &err_msg_out, nullptr, nullptr);
-    if (!innerapis) {
-        return false;
-    }
-    if (!innerapis->GetAsDictionary(&innerapis_dict)) {
-        return false;
-    }
-    LoadInnerApi(innerapis_dict);
-    return true;
 }
 
 bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const Value *enable, Err *err)
 {
-    const char *paths_file = "parts_info/parts_path_info.json";
-    std::string paths_content;
-    if (!ReadBuildConfigFile(build_dir, paths_file, paths_content)) {
+    const char *components_file = "parts_info/components.json";
+    std::string components_content;
+    if (!ReadBuildConfigFile(build_dir, components_file, components_content)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
             "OpenHarmony build config file (" +
-            std::string(paths_file) + ") does not exists.\n");
+            std::string(components_file) + ") does not exists.\n");
         return false;
-    }
-    const char *subsystems_file = "parts_info/part_subsystem.json";
-    std::string subsystems_content;
-    if (!ReadBuildConfigFile(build_dir, subsystems_file, subsystems_content)) {
-        *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
-            "OpenHarmony build config file (" +
-            std::string(subsystems_file) + ") does not exists.\n");
-        return false;
-    }
-    const char *innerapis_file = "parts_info/inner_kits_info.json";
-    std::string innerapis_content;
-    if (!ReadBuildConfigFile(build_dir, innerapis_file, innerapis_content)) {
-        *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
-            "OpenHarmony build config file (" +
-            std::string(innerapis_file) + ") does not exists.\n");
-        return false;
-    }
-    const char *override_file = "component_override_map.json";
-    std::string override_map;
-    if (!ReadBuildConfigFile(build_dir, override_file, override_map)) {
-        override_map = EMPTY_INNERAPI;
     }
     std::string err_msg_out;
-    if (!LoadComponentSubsystemAndPaths(paths_content, override_map, subsystems_content, err_msg_out)) {
+    if (!LoadComponentInfo(components_content, err_msg_out)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
             "OpenHarmony build config file parsing failed:\n" +
             err_msg_out + "\n");
-        return false;
-    }
-    if (!LoadOhosInnerApis_(innerapis_content, err_msg_out)) {
-        *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
-            "OpenHarmony build config file " +
-            std::string(innerapis_file) + " parsing failed:\n" + err_msg_out + "\n");
         return false;
     }
     return true;
@@ -481,5 +439,22 @@ void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, con
     }
     OhosComponentChecker::Init(build_dir, checkType);
     InnerApiPublicInfoGenerator::Init(build_dir, checkType);
+    return;
+}
+
+void OhosComponents::LoadOhosComponentsMapping(const Value *support, const Value *independent)
+{
+    if (!support) {
+        return;
+    }
+    if (!support->boolean_value()) {
+        return;
+    }
+
+    if (!independent || !independent->boolean_value()) {
+        return;
+    }
+
+    OhosComponentMapping::Init();
     return;
 }

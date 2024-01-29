@@ -441,9 +441,8 @@ bool TargetGenerator::FillGenericDeps(const char* var_name,
                                       LabelTargetVector* dest) {
   const Value* value = scope_->GetValue(var_name, true);
   if (value) {
-    ExtractListOfLabels(scope_->settings()->build_settings(), *value,
-                        scope_->GetSourceDir(), ToolchainLabelForScope(scope_),
-                        dest, err_);
+    ExtractListOfLabelsMapping(target_->label().GetUserVisibleName(false), scope_->settings()->build_settings(),
+                               *value, scope_->GetSourceDir(), ToolchainLabelForScope(scope_), dest, err_);
   }
   return !err_->has_error();
 }

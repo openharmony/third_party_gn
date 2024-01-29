@@ -10,6 +10,7 @@
 #include "gn/err.h"
 #include "gn/frameworks_utils.h"
 #include "gn/label.h"
+#include "gn/ohos_components_mapping.h"
 #include "gn/source_dir.h"
 #include "gn/source_file.h"
 #include "gn/target.h"
@@ -190,6 +191,46 @@ struct LabelResolver {
   const Label& current_toolchain;
 };
 
+// Fills the label part of a LabelPtrPair, if it is a cross-component dependency, mapping is required.
+template <typename T>
+struct LabelPtrResolverMapping {
+  LabelPtrResolverMapping(const std::string &label_in,
+                   const BuildSettings* build_settings_in,
+                   const SourceDir& current_dir_in,
+                   const Label& current_toolchain_in)
+      : label(label_in),
+        build_settings(build_settings_in),
+        current_dir(current_dir_in),
+        current_toolchain(current_toolchain_in) {}
+  bool operator()(const Value& v, LabelPtrPair<T>* out, Err* err) const {
+    if (!v.VerifyTypeIs(Value::STRING, err)) {
+      return false;
+    }
+    
+
+    std::string map_label = "";
+    OhosComponentMapping *mapping = OhosComponentMapping::getInstance();
+    if (mapping != nullptr) {
+        map_label = mapping->MappingTargetAbsoluteDpes(build_settings, label, v.string_value());
+    }
+    if (map_label != "") {
+      Value map_dep(v.origin(), map_label);
+      out->label = Label::Resolve(current_dir, build_settings->root_path_utf8(),
+                                  current_toolchain, map_dep, err);
+      out->origin = map_dep.origin();
+    } else {
+      out->label = Label::Resolve(current_dir, build_settings->root_path_utf8(),
+                                  current_toolchain, v, err);
+      out->origin = v.origin();
+    }
+    return !err->has_error();
+  }
+  const std::string &label;
+  const BuildSettings* build_settings;
+  const SourceDir& current_dir;
+  const Label& current_toolchain;
+};
+
 // Fills the label part of a LabelPtrPair, leaving the pointer null.
 template <typename T>
 struct LabelPtrResolver {
@@ -309,6 +350,18 @@ bool ExtractListOfLabels(const BuildSettings* build_settings,
   return ListValueExtractor(
       value, dest, err,
       LabelPtrResolver<Target>(build_settings, current_dir, current_toolchain));
+}
+
+bool ExtractListOfLabelsMapping(const std::string& label,
+                         const BuildSettings* build_settings,
+                         const Value& value,
+                         const SourceDir& current_dir,
+                         const Label& current_toolchain,
+                         LabelTargetVector* dest,
+                         Err* err) {
+  return ListValueExtractor(
+      value, dest, err,
+      LabelPtrResolverMapping<Target>(label, build_settings, current_dir, current_toolchain));
 }
 
 bool ExtractListOfExternalDeps(const BuildSettings* build_settings,

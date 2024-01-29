@@ -37,7 +37,8 @@ public:
         Err *err) const;
     bool CheckInnerApiPublicDepsInner(const Target *target, const std::string label, const std::string deps,
         Err *err) const;
-    bool CheckInnerApiNotLib(const Item *item, const OhosComponent *component, const std::string label, Err *err) const;
+    bool CheckInnerApiNotLib(const Item *item, const OhosComponent *component, const std::string label,
+        const std::string deps, Err *err) const;
     bool CheckInnerApiNotDeclare(const Item *item, const OhosComponent *component, const std::string label,
         Err *err) const;
     bool CheckIncludesAbsoluteDepsOther(const Target *target, const std::string label, const std::string includes,
@@ -65,6 +66,7 @@ private:
     bool InterceptInnerApiPublicDepsInner(const Target *target, const std::string label, const std::string deps,
         Err *err) const;
     bool InterceptInnerApiNotLib(const Item *item, const std::string label, Err *err) const;
+    bool InterceptDepsNotLib(const Item *item, const std::string label, const std::string deps, Err *err) const;
     bool InterceptInnerApiNotDeclare(const Item *item, const std::string label, Err *err) const;
     bool InterceptIncludesAbsoluteDepsOther(const Target *target, const std::string label, const std::string includes,
         Err *err) const;

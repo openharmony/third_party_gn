@@ -56,6 +56,14 @@ bool ExtractListOfLabels(const BuildSettings* build_settings,
                          LabelTargetVector* dest,
                          Err* err);
 
+bool ExtractListOfLabelsMapping(const std::string& label,
+                                const BuildSettings* build_settings,
+                                const Value& value,
+                                const SourceDir& current_dir,
+                                const Label& current_toolchain,
+                                LabelTargetVector* dest,
+                                Err* err);
+
 bool ExtractListOfExternalDeps(const BuildSettings* build_settings,
                                const Value& value,
                                const SourceDir& current_dir,

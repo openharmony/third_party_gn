@@ -122,7 +122,7 @@ bool Visibility::CheckItemVisibility(const Item *from, const Item *to, bool is_e
 
     OhosComponentChecker *checker = OhosComponentChecker::getInstance();
     if (checker != nullptr) {
-        if (!checker->CheckInnerApiNotLib(to, to_component, to_label, err) ||
+        if (!checker->CheckInnerApiNotLib(to, to_component, from_label, to_label, err) ||
             !checker->CheckInnerApiNotDeclare(to, to_component, to_label, err) ||
             !checker->CheckTargetAbsoluteDepsOther(from, to_component, from_label, to_label, is_external_deps, err) ||
             !checker->CheckInnerApiVisibilityDenied(from, to_component, from_label, to_label, err)) {
