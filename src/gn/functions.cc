@@ -17,6 +17,7 @@
 #include "gn/err.h"
 #include "gn/input_file.h"
 #include "gn/ohos_components_checker.h"
+#include "gn/ohos_components_mapping.h"
 #include "gn/parse_node_value_adapter.h"
 #include "gn/parse_tree.h"
 #include "gn/pool.h"
@@ -663,15 +664,32 @@ Value RunImport(Scope* scope,
   const SourceDir& input_dir = scope->GetSourceDir();
   SourceFile import_file = input_dir.ResolveRelativeFile(
       args[0], err, scope->settings()->build_settings()->root_path_utf8());
+
+  const OhosComponentChecker *checker = OhosComponentChecker::getInstance();
+  if (checker != nullptr) {
+    checker->CheckImportOther(function, scope->settings()->build_settings(),
+                              input_dir.value(), import_file.value(), err);
+  }
+
+  std::string mapping_file = "";
+  const OhosComponentMapping *mapping = OhosComponentMapping::getInstance();
+  if (mapping != nullptr) {
+    mapping_file = mapping->MappingImportOther(scope->settings()->build_settings(),
+                                               input_dir.value(), import_file.value());
+  }
+
+  if (mapping_file != "") {
+    SourceFile real_file(mapping_file);
+    scope->AddBuildDependencyFile(real_file);
+    if (!err->has_error()) {
+      scope->settings()->import_manager().DoImport(real_file, function, scope, err);
+    }
+    return Value();
+  }
   scope->AddBuildDependencyFile(import_file);
   if (!err->has_error()) {
     scope->settings()->import_manager().DoImport(import_file, function, scope,
                                                  err);
-  }
-  const OhosComponentChecker *checker = OhosComponentChecker::getInstance();
-  if (checker != nullptr) {
-      checker->CheckImportOther(function, scope->settings()->build_settings(),
-                                input_dir.value(), import_file.value(), err);
   }
   return Value();
 }

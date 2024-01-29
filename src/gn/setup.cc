@@ -413,12 +413,17 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
   if (ohos_components_.isOhosComponentsLoaded()) {
     build_settings_.SetOhosComponentsInfo(&ohos_components_);
   }
-  
+
   const Value* checkType = build_settings_.build_args().GetArgOverride("ohos_components_checktype");
   if (checkType && checkType->type() == Value::INTEGER) {
       ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value());
   } else {
       ohos_components_.LoadOhosComponentsChecker(build_dir, support, 0);
+  }
+
+  const Value *independent = build_settings_.build_args().GetArgOverride("ohos_indep_compiler_enable");
+  if (independent) {
+      ohos_components_.LoadOhosComponentsMapping(support, independent);
   }
   return true;
 }

@@ -651,6 +651,7 @@ def WriteGNNinja(path, platform, host, options, args_list):
         'src/gn/ninja_writer.cc',
         'src/gn/ohos_components.cc',
         "src/gn/ohos_components_checker.cc",
+        "src/gn/ohos_components_mapping.cc",
         'src/gn/ohos_variables.cc',
         'src/gn/operators.cc',
         'src/gn/output_conversion.cc',
