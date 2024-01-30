@@ -74,18 +74,13 @@ private:
                                                     const char *path, size_t len);
     void addComponentToTree(struct OhosComponentTree *current, OhosComponent *component);
 
-    void LoadInnerApi(const base::DictionaryValue *innerapis);
-
     // For unittest
 public:
     const OhosComponent *matchComponentByLabel(const char *label);
 
-    bool LoadComponentSubsystemAndPaths(const std::string &paths,
-                                        const std::string &override_map,
-                                        const std::string &subsystems,
-                                        std::string &err_msg_out);
+    bool LoadComponentInfo(const std::string &components_content, std::string &err_msg_out);
 
-    bool LoadOhosInnerApis_(const std::string innerapi_content, std::string &err_msg_out);
+    void LoadInnerApi(const std::string &component_name, const std::vector<base::Value> &innerapis);
 };
 
 #endif // TOOLS_GN_OHOS_COMPONENTS_MGR_H_
