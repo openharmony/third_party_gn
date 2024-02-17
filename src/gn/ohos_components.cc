@@ -287,7 +287,7 @@ void OhosComponentsImpl::LoadInnerApi(const std::string &component_name, const s
 
 void OhosComponentsImpl::LoadOverrideMap(const std::string &override_map)
 {
-   const base::DictionaryValue *override_dict;
+    const base::DictionaryValue *override_dict;
     std::unique_ptr<base::Value> override_value = base::JSONReader::ReadAndReturnError(override_map,
         base::JSONParserOptions::JSON_PARSE_RFC, nullptr, nullptr, nullptr, nullptr);
     if (!override_value) {
