@@ -26,7 +26,7 @@
 #include "gn/value.h"
 
 static const std::string SCAN_RESULT_PATH = "scan_out";
-static const std::string WHITELIST_PATH = "build/component_compilation_whitelist.json";
+static const std::string WHITELIST_PATH = "component_compilation_whitelist.json";
 static std::vector<std::string> all_deps_config_;
 static std::vector<std::string> includes_over_range_;
 static std::map<std::string, std::vector<std::string>> innerapi_public_deps_inner_;
@@ -164,11 +164,13 @@ static std::map<std::string, std::function<void(const base::Value &value)>> whit
     { "deps_not_lib", LoadDepsNotLibWhitelist }
 };
 
-static void LoadWhitelist()
+static void LoadWhitelist(const std::string &build_dir)
 {
     std::string whitelistContent;
-    if (!ReadBuildConfigFile(base::FilePath(WHITELIST_PATH), whitelistContent)) {
-        return;
+    if (!ReadBuildConfigFile(base::FilePath(build_dir + "/" + WHITELIST_PATH), whitelistContent)) {
+        if (!ReadBuildConfigFile(base::FilePath("build/" + WHITELIST_PATH), whitelistContent)) {
+            return;
+        }
     }
     const base::DictionaryValue *whitelist_dict;
     std::unique_ptr<base::Value> whitelist = base::JSONReader::ReadAndReturnError(whitelistContent,
@@ -331,7 +333,7 @@ OhosComponentChecker::OhosComponentChecker(const std::string &build_dir, int che
     checkType_ = checkType;
     build_dir_ = build_dir;
     if (checkType_ == CheckType::INTERCEPT_IGNORE_TEST || checkType_ == CheckType::INTERCEPT_ALL) {
-        LoadWhitelist();
+        LoadWhitelist(build_dir_);
     }
     if (checkType_ == CheckType::SCAN_ALL || checkType_ == CheckType::INTERCEPT_ALL) {
         ignoreTest_ = false;
@@ -460,7 +462,8 @@ bool OhosComponentChecker::CheckIncludesAbsoluteDepsOther(const Target *target, 
         return true;
     }
 
-    if (!StartWith(includes, "//") || StartWith(includes, "//out/") || StartWith(includes, "////out/")) {
+    if (!StartWith(includes, "//") || StartWith(includes, "//out/") || StartWith(includes, "////out/")
+        || StartWith(includes, "//prebuilts/")) {
         return true;
     }
 
@@ -546,7 +549,8 @@ bool OhosComponentChecker::CheckImportOther(const FunctionCallNode* function, co
     if (component == nullptr) {
         return true;
     }
-    if (StartWith(deps, component->path()) || StartWith(deps, "//build/") || StartWith(deps, "//out/")) {
+    if (StartWith(deps, component->path()) || StartWith(deps, "//build/") || StartWith(deps, "//out/")
+        || StartWith(deps, "//prebuilts/")) {
         return true;
     }
 

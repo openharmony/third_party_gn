@@ -16,12 +16,12 @@
 
 class OhosComponentMapping {
 public:
-    static void Init()
+    static void Init(const std::string& build_dir)
     {
         if (instance_ != nullptr) {
             return;
         }
-        instance_ = new OhosComponentMapping();
+        instance_ = new OhosComponentMapping(build_dir);
     }
 
     const std::string MappingTargetAbsoluteDpes(const BuildSettings* build_settings,
@@ -35,8 +35,10 @@ public:
     }
 
 private:
+    std::string build_dir_;
     static OhosComponentMapping *instance_;
     OhosComponentMapping() {}
+    OhosComponentMapping(const std::string &build_dir);
     OhosComponentMapping &operator = (const OhosComponentMapping &) = delete;
 };
 

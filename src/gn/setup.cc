@@ -423,7 +423,7 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
 
   const Value *independent = build_settings_.build_args().GetArgOverride("ohos_indep_compiler_enable");
   if (independent) {
-      ohos_components_.LoadOhosComponentsMapping(support, independent);
+      ohos_components_.LoadOhosComponentsMapping(build_dir, support, independent);
   }
   return true;
 }

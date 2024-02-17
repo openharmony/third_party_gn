@@ -285,6 +285,24 @@ void OhosComponentsImpl::LoadInnerApi(const std::string &component_name, const s
     }
 }
 
+void OhosComponentsImpl::LoadOverrideMap(const std::string &override_map)
+{
+   const base::DictionaryValue *override_dict;
+    std::unique_ptr<base::Value> override_value = base::JSONReader::ReadAndReturnError(override_map,
+        base::JSONParserOptions::JSON_PARSE_RFC, nullptr, nullptr, nullptr, nullptr);
+    if (!override_value) {
+        return;
+    }
+    if (!override_value->GetAsDictionary(&override_dict)) {
+        return;
+    }
+
+    for (const auto com : override_dict->DictItems()) {
+        override_map_[com.first] = com.second.GetString();
+    }
+    return;
+}
+
 bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const Value *enable, Err *err)
 {
     const char *components_file = "parts_info/components.json";
@@ -295,6 +313,12 @@ bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const 
             std::string(components_file) + ") does not exists.\n");
         return false;
     }
+
+    std::string override_map;
+    if (ReadBuildConfigFile(build_dir, "component_override_map.json", override_map)) {
+        LoadOverrideMap(override_map);
+    }
+
     std::string err_msg_out;
     if (!LoadComponentInfo(components_content, err_msg_out)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
@@ -324,6 +348,12 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
         return false;
     }
     std::string component_name = str_val.substr(0, sep);
+    for (const auto& pair : override_map_) {
+        if (pair.first == component_name) {
+            component_name = pair.second;
+            break;
+        }
+    }
     const OhosComponent *component = GetComponentByName(component_name);
     if (component == nullptr) {
         *err = Err(external_dep, "OHOS component : (" + component_name + ") not found.");
@@ -442,7 +472,8 @@ void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, con
     return;
 }
 
-void OhosComponents::LoadOhosComponentsMapping(const Value *support, const Value *independent)
+void OhosComponents::LoadOhosComponentsMapping(const std::string& build_dir,
+    const Value *support, const Value *independent)
 {
     if (!support) {
         return;
@@ -455,6 +486,6 @@ void OhosComponents::LoadOhosComponentsMapping(const Value *support, const Value
         return;
     }
 
-    OhosComponentMapping::Init();
+    OhosComponentMapping::Init(build_dir);
     return;
 }

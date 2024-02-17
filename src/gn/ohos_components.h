@@ -75,7 +75,7 @@ public:
 
     void LoadOhosComponentsChecker(const std::string &build_dir, const Value *support, int checkType);
 
-    void LoadOhosComponentsMapping(const Value *support, const Value *independent);
+    void LoadOhosComponentsMapping(const std::string& build_dir, const Value *support, const Value *independent);
 
 private:
     OhosComponentsImpl *mgr = nullptr;
