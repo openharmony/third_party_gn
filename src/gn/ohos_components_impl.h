@@ -68,11 +68,15 @@ private:
 
     std::map<std::string, OhosComponent *> components_;
 
+    std::map<std::string, std::string> override_map_;
+
     struct OhosComponentTree *pathTree = nullptr;
     void setupComponentsTree();
     const struct OhosComponentTree *findChildByPath(const struct OhosComponentTree *current,
                                                     const char *path, size_t len);
     void addComponentToTree(struct OhosComponentTree *current, OhosComponent *component);
+
+    void LoadOverrideMap(const std::string &override_map);
 
     // For unittest
 public:
