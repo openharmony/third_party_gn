@@ -265,14 +265,14 @@ bool TargetGenerator::FillData() {
 bool TargetGenerator::FillDependencies() {
   if (!FillGenericDeps(variables::kDeps, &target_->private_deps()))
     return false;
+  if (!FillGenericDeps(variables::kPublicDeps, &target_->public_deps()))
+    return false;
   if (scope_->settings()->build_settings()->is_ohos_components_enabled()) {
     if (!FillOhosComponentDeps(variables::kExternalDeps, &target_->private_deps()))
       return false;
     if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps()))
       return false;
   }
-  if (!FillGenericDeps(variables::kPublicDeps, &target_->public_deps()))
-    return false;
   if (!FillGenericDeps(variables::kDataDeps, &target_->data_deps()))
     return false;
   if (!FillGenericDeps(variables::kGenDeps, &target_->gen_deps()))
