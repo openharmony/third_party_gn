@@ -4,7 +4,6 @@
 
 #include "gn/ohos_components_mapping.h"
 
-#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -107,7 +106,7 @@ const std::string OhosComponentMapping::MappingTargetAbsoluteDpes(const BuildSet
     }
 
     size_t pos = deps.find(":");
-    if (pos <= 0) {
+    if (pos == std::string::npos) {
         return "";
     }
     return deps_component->getInnerApi(deps.substr(pos + 1));

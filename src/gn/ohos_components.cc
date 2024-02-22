@@ -48,7 +48,7 @@ void OhosComponent::addInnerApi(const std::string &name, const std::string &labe
 {
     std::string la = label;
     size_t pos = label.find(":");
-    if (pos > 0) {
+    if (pos != std::string::npos) {
         if ((label[pos - 1]) == '/') { // some are like this : "//components/foo/libfoo/:libfoo"
             unsigned long indexToRemove = pos - 1;
             if (indexToRemove >= 0 && indexToRemove <= la.length()) {
@@ -341,7 +341,7 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
 {
     std::string str_val = external_dep.string_value();
     size_t sep = str_val.find(":");
-    if (sep <= 0) {
+    if (sep == std::string::npos) {
         *err = Err(external_dep, "OHOS component external_deps format error: (" + external_dep.string_value() +
             "),"
             "it should be a string like \"component_name:innerapi_name\".");

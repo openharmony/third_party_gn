@@ -4,7 +4,6 @@
 
 #include "gn/ohos_components_checker.h"
 
-#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
