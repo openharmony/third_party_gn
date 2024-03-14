@@ -360,7 +360,14 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
         return false;
     }
     std::string innerapi_name = str_val.substr(sep + 1);
-    label = component->getInnerApi(innerapi_name);
+    size_t tool_sep = innerapi_name.find("(");
+    std::string tool_chain = "";
+    if (tool_sep != std::string::npos) {
+        tool_chain = innerapi_name.substr(tool_sep);
+        innerapi_name = innerapi_name.substr(0, tool_sep);
+    }
+
+    label = component->getInnerApi(innerapi_name) + tool_chain;
     if (label == EMPTY_INNERAPI) {
         *err = Err(external_dep,
             "OHOS innerapi: (" + innerapi_name + ") not found for component (" + component_name + ").");

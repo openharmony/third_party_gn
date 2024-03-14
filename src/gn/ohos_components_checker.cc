@@ -423,7 +423,8 @@ bool OhosComponentChecker::CheckInnerApiNotLib(const Item *item, const OhosCompo
     }
 
     Target::OutputType type = item->AsTarget()->output_type();
-    if (type == Target::SHARED_LIBRARY || type == Target::STATIC_LIBRARY || type == Target::RUST_LIBRARY) {
+    if (type == Target::SHARED_LIBRARY || type == Target::STATIC_LIBRARY || type == Target::RUST_LIBRARY ||
+        type == Target::EXECUTABLE || type == Target::COPY_FILES) {
         return true;
     }
 
