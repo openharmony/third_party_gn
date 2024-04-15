@@ -337,7 +337,42 @@ const OhosComponent *OhosComponentsImpl::GetComponentByName(const std::string &c
     return nullptr;
 }
 
-bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::string &label, Err *err) const
+static size_t GetWholeArchiveFlag(std::string str_val, int &whole_status)
+{
+    size_t sep_whole = str_val.find("(--whole-archive)");
+    if (sep_whole != std::string::npos) {
+        whole_status = 1;
+    } else {
+        sep_whole = str_val.find("(--no-whole-archive)");
+        if (sep_whole != std::string::npos) {
+            whole_status = 0;
+        } else {
+            whole_status = -1;
+        }
+    }
+    return sep_whole;
+}
+
+bool OhosComponentsImpl::GetPrivateDepsLabel(const Value &dep, std::string &label, int &whole_status, Err *err) const
+{
+    std::string str_val = dep.string_value();
+    size_t sep_whole = GetWholeArchiveFlag(str_val, whole_status);
+
+    if (sep_whole != std::string::npos) {
+        label = str_val.substr(0, sep_whole);
+    } else {
+        label = str_val;
+    }
+    if (label == EMPTY_INNERAPI) {
+        *err = Err(dep,
+            "Deps label: (" + dep.string_value() + ") format error.");
+        return false;
+    }
+    return true;
+}
+
+bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::string &label,
+    int &whole_status, Err *err) const
 {
     std::string str_val = external_dep.string_value();
     size_t sep = str_val.find(":");
@@ -359,12 +394,19 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
         *err = Err(external_dep, "OHOS component : (" + component_name + ") not found.");
         return false;
     }
-    std::string innerapi_name = str_val.substr(sep + 1);
-    size_t tool_sep = innerapi_name.find("(");
+
+    std::string innerapi_name;
     std::string tool_chain = "";
-    if (tool_sep != std::string::npos) {
-        tool_chain = innerapi_name.substr(tool_sep);
-        innerapi_name = innerapi_name.substr(0, tool_sep);
+    size_t sep_whole = GetWholeArchiveFlag(str_val, whole_status);
+    if (sep_whole != std::string::npos) {
+        innerapi_name = str_val.substr(sep + 1, sep_whole - sep - 1);
+    } else {
+        innerapi_name = str_val.substr(sep + 1);
+        size_t tool_sep = innerapi_name.find("(");
+        if (tool_sep != std::string::npos) {
+            tool_chain = innerapi_name.substr(tool_sep);
+            innerapi_name = innerapi_name.substr(0, tool_sep);
+        }
     }
 
     label = component->getInnerApi(innerapi_name) + tool_chain;
@@ -429,7 +471,8 @@ bool OhosComponents::isOhosComponentsLoaded() const
     }
 }
 
-bool OhosComponents::GetExternalDepsLabel(const Value &external_dep, std::string &label, Err *err) const
+bool OhosComponents::GetExternalDepsLabel(const Value &external_dep, std::string &label,
+    int &whole_status, Err *err) const
 {
     if (!mgr) {
         if (err) {
@@ -438,7 +481,19 @@ bool OhosComponents::GetExternalDepsLabel(const Value &external_dep, std::string
         }
         return false;
     }
-    return mgr->GetExternalDepsLabel(external_dep, label, err);
+    return mgr->GetExternalDepsLabel(external_dep, label, whole_status, err);
+}
+
+bool OhosComponents::GetPrivateDepsLabel(const Value &dep, std::string &label, int &whole_status, Err *err) const
+{
+    if (!mgr) {
+        if (err) {
+            *err = Err(dep, "You are compiling OpenHarmony components, but \n"
+                "\"ohos_components_support\" is not enabled or build_configs files are invalid.");
+        }
+        return false;
+    }
+    return mgr->GetPrivateDepsLabel(dep, label, whole_status, err);
 }
 
 bool OhosComponents::GetSubsystemName(const Value &part_name, std::string &label, Err *err) const

@@ -259,6 +259,14 @@ class Target : public Item {
   const LabelTargetVector& private_deps() const { return private_deps_; }
   LabelTargetVector& private_deps() { return private_deps_; }
 
+  // Linked whole archive dependencies.
+  const LabelTargetVector& whole_archive_deps() const { return whole_archive_deps_; }
+  LabelTargetVector& whole_archive_deps() { return whole_archive_deps_; }
+
+  // Linked no whole archive dependencies.
+  const LabelTargetVector& no_whole_archive_deps() const { return no_whole_archive_deps_; }
+  LabelTargetVector& no_whole_archive_deps() { return no_whole_archive_deps_; }
+
   // Linked public dependencies.
   const LabelTargetVector& public_deps() const { return public_deps_; }
   LabelTargetVector& public_deps() { return public_deps_; }
@@ -492,6 +500,8 @@ class Target : public Item {
   std::unique_ptr<BundleData> bundle_data_;
   OutputFile write_runtime_deps_output_;
 
+  LabelTargetVector whole_archive_deps_;
+  LabelTargetVector no_whole_archive_deps_;
   LabelTargetVector private_deps_;
   LabelTargetVector public_deps_;
   LabelTargetVector data_deps_;

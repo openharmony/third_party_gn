@@ -13,7 +13,6 @@
 #include "gn/err.h"
 #include "gn/value.h"
 
-
 class OhosComponent {
 public:
     OhosComponent();
@@ -68,7 +67,8 @@ public:
     bool LoadOhosComponents(const std::string &build_dir, const Value *enable, Err *err);
     bool isOhosComponentsLoaded() const;
 
-    bool GetExternalDepsLabel(const Value &external_dep, std::string &label, Err *err) const;
+    bool GetExternalDepsLabel(const Value &external_dep, std::string &label, int &whole_status, Err *err) const;
+    bool GetPrivateDepsLabel(const Value &dep, std::string &label, int &whole_status, Err *err) const;
     bool GetSubsystemName(const Value &part_name, std::string &label, Err *err) const;
 
     const OhosComponent *GetComponentByLabel(const std::string &label) const;

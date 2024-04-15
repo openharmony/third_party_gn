@@ -37,8 +37,36 @@ bool ListValueExtractor(const Value& value,
 
 // Sets the error and returns false on failure.
 template <typename T, class Converter>
+bool ListValueExtractorExt(const Value& value,
+                        std::vector<T>* dest,
+                        std::vector<T>* whole_dest,
+                        std::vector<T>* no_whole_dest,
+                        Err* err,
+                        const Converter& converter) {
+  if (!value.VerifyTypeIs(Value::LIST, err))
+    return false;
+  const std::vector<Value>& input_list = value.list_value();
+  dest->resize(input_list.size());
+  for (size_t i = 0; i < input_list.size(); i++) {
+    int whole_status = -1;
+    if (!converter(input_list[i], &(*dest)[i], whole_status, err))
+      return false;
+
+    if (whole_status == 1) {
+      whole_dest->push_back((*dest)[i]);
+    } else if (whole_status == 0) {
+      no_whole_dest->push_back((*dest)[i]);
+    }
+  }
+  return true;
+}
+
+// Sets the error and returns false on failure.
+template <typename T, class Converter>
 bool ListValueAppender(const Value& value,
                        std::vector<T>* dest,
+                       std::vector<T>* whole_dest,
+                       std::vector<T>* no_whole_dest,
                        Err* err,
                        const Converter& converter)
 {
@@ -47,9 +75,15 @@ bool ListValueAppender(const Value& value,
   const std::vector<Value>& input_list = value.list_value();
   for (const auto& item : input_list) {
     T new_one;
-    if (!converter(item, &new_one, err))
+    int whole_status = -1;
+    if (!converter(item, &new_one, whole_status, err))
       return false;
     dest->push_back(new_one);
+    if (whole_status == 1) {
+      whole_dest->push_back(new_one);
+    } else if (whole_status == 0) {
+      no_whole_dest->push_back(new_one);
+    }
   }
   return true;
 }
@@ -202,16 +236,20 @@ struct LabelPtrResolverMapping {
         build_settings(build_settings_in),
         current_dir(current_dir_in),
         current_toolchain(current_toolchain_in) {}
-  bool operator()(const Value& v, LabelPtrPair<T>* out, Err* err) const {
+  bool operator()(const Value& v, LabelPtrPair<T>* out, int &whole_status, Err* err) const {
     if (!v.VerifyTypeIs(Value::STRING, err)) {
       return false;
     }
-    
+
+    std::string dep_label;
+    if (!build_settings->GetPrivateDepsLabel(v, dep_label, whole_status, err)) {
+      return false;
+    }
 
     std::string map_label = "";
     OhosComponentMapping *mapping = OhosComponentMapping::getInstance();
     if (mapping != nullptr) {
-        map_label = mapping->MappingTargetAbsoluteDpes(build_settings, label, v.string_value());
+        map_label = mapping->MappingTargetAbsoluteDpes(build_settings, label, dep_label);
     }
     if (map_label != "") {
       Value map_dep(v.origin(), map_label);
@@ -219,8 +257,9 @@ struct LabelPtrResolverMapping {
                                   current_toolchain, map_dep, err);
       out->origin = map_dep.origin();
     } else {
+      Value dep_value(v.origin(), dep_label);
       out->label = Label::Resolve(current_dir, build_settings->root_path_utf8(),
-                                  current_toolchain, v, err);
+                                  current_toolchain, dep_value, err);
       out->origin = v.origin();
     }
     return !err->has_error();
@@ -262,13 +301,13 @@ struct ExternalDepPtrResolver {
       : build_settings(build_settings_in),
         current_dir(current_dir_in),
         current_toolchain(current_toolchain_in) {}
-  bool operator()(const Value& v, LabelPtrPair<T>* out, Err* err) const
+  bool operator()(const Value& v, LabelPtrPair<T>* out, int &whole_status, Err* err) const
   {
     if (!v.VerifyTypeIs(Value::STRING, err)) {
       return false;
     }
     std::string label;
-    if (!build_settings->GetExternalDepsLabel(v, label, err)) {
+    if (!build_settings->GetExternalDepsLabel(v, label, whole_status, err)) {
       return false;
     }
     Value external_dep(v.origin(), label);
@@ -358,9 +397,11 @@ bool ExtractListOfLabelsMapping(const std::string& label,
                          const SourceDir& current_dir,
                          const Label& current_toolchain,
                          LabelTargetVector* dest,
+                         LabelTargetVector* whole_dest,
+                         LabelTargetVector* no_whole_dest,
                          Err* err) {
-  return ListValueExtractor(
-      value, dest, err,
+  return ListValueExtractorExt(
+      value, dest, whole_dest, no_whole_dest, err,
       LabelPtrResolverMapping<Target>(label, build_settings, current_dir, current_toolchain));
 }
 
@@ -369,9 +410,11 @@ bool ExtractListOfExternalDeps(const BuildSettings* build_settings,
                                const SourceDir& current_dir,
                                const Label& current_toolchain,
                                LabelTargetVector* dest,
+                               LabelTargetVector* whole_dest,
+                               LabelTargetVector* no_whole_dest,
                                Err* err) {
   return ListValueAppender(
-      value, dest, err,
+      value, dest, whole_dest, no_whole_dest, err,
       ExternalDepPtrResolver<Target>(build_settings, current_dir, current_toolchain));
 }
 
