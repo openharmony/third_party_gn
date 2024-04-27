@@ -79,8 +79,10 @@ class TargetGenerator {
                           UniqueVector<LabelConfigPair>* dest);
   bool FillGenericDeps(const char* var_name, LabelTargetVector* dest);
 
-  bool FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest);
-
+  bool FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest,
+    LabelTargetVector* whole_dest, LabelTargetVector* no_whole_dest);
+  bool FillGenericDepsWithWholeArchive(const char* var_name, LabelTargetVector* dest,
+    LabelTargetVector* whole_dest, LabelTargetVector* no_whole_dest);
   TargetGenerator(const TargetGenerator&) = delete;
   TargetGenerator& operator=(const TargetGenerator&) = delete;
 };

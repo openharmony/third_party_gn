@@ -35,6 +35,7 @@ static std::map<std::string, std::vector<std::string>> includes_absolute_deps_ot
 static std::map<std::string, std::vector<std::string>> target_absolute_deps_other_;
 static std::map<std::string, std::vector<std::string>> import_other_;
 static std::map<std::string, std::vector<std::string>> deps_not_lib_;
+static std::map<std::string, std::vector<std::string>> fuzzy_match_;
 
 OhosComponentChecker *OhosComponentChecker::instance_ = nullptr;
 
@@ -151,6 +152,15 @@ static void LoadDepsNotLibWhitelist(const base::Value &value)
     }
 }
 
+static void LoadFuzzyMatchWhitelist(const base::Value &value)
+{
+    for (auto info : value.DictItems()) {
+        for (const base::Value &value_tmp : info.second.GetList()) {
+            fuzzy_match_[info.first].push_back(value_tmp.GetString());
+        }
+    }
+}
+
 static std::map<std::string, std::function<void(const base::Value &value)>> whitelist_map_ = {
     { "all_dependent_configs", LoadAllDepsConfigWhitelist },
     { "includes_over_range", LoadIncludesOverRangeWhitelist },
@@ -160,7 +170,8 @@ static std::map<std::string, std::function<void(const base::Value &value)>> whit
     { "includes_absolute_deps_other", LoadIncludesAbsoluteDepsOtherWhitelist },
     { "target_absolute_deps_other", LoadAbsoluteDepsOtherWhitelist },
     { "import_other", LoadImportOtherWhitelist },
-    { "deps_not_lib", LoadDepsNotLibWhitelist }
+    { "deps_not_lib", LoadDepsNotLibWhitelist },
+    { "fuzzy_match", LoadFuzzyMatchWhitelist }
 };
 
 static void LoadWhitelist(const std::string &build_dir)
@@ -243,6 +254,15 @@ bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::
 bool OhosComponentChecker::InterceptDepsNotLib(const Item *item, const std::string label,
     const std::string deps, Err *err) const
 {
+    if (auto res = fuzzy_match_.find("deps_not_lib"); res != fuzzy_match_.end()) {
+        std::string deps_str(deps);
+        for (auto res_second : res->second) {
+            if (StartWith(Trim(deps_str), res_second)) {
+                return true;
+            }
+        }
+    }
+
     if (auto res = deps_not_lib_.find(label); res != deps_not_lib_.end()) {
         std::string deps_str(deps);
         auto res_second = std::find(res->second.begin(), res->second.end(), Trim(deps_str));
@@ -269,6 +289,15 @@ bool OhosComponentChecker::InterceptInnerApiNotDeclare(const Item *item, const s
 bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *target, const std::string label,
     const std::string includes, Err *err) const
 {
+    if (auto res = fuzzy_match_.find("deps_includes_absolute"); res != fuzzy_match_.end()) {
+        std::string includes_str(includes);
+        for (auto res_second : res->second) {
+            if (StartWith(Trim(includes_str), res_second)) {
+                return true;
+            }
+        }
+    }
+
     if (auto res = includes_absolute_deps_other_.find(label); res != includes_absolute_deps_other_.end()) {
         std::string includes_str(includes);
         auto res_second = std::find(res->second.begin(), res->second.end(), Trim(includes_str));
@@ -287,6 +316,15 @@ bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *targ
 bool OhosComponentChecker::InterceptTargetAbsoluteDepsOther(const Item *item, const std::string label,
     const std::string deps, Err *err) const
 {
+    if (auto res = fuzzy_match_.find("deps_component_absolute"); res != fuzzy_match_.end()) {
+        std::string deps_str(deps);
+        for (auto res_second : res->second) {
+            if (StartWith(Trim(deps_str), res_second)) {
+                return true;
+            }
+        }
+    }
+
     if (auto res = target_absolute_deps_other_.find(label); res != target_absolute_deps_other_.end()) {
         std::string deps_str(deps);
         auto res_second = std::find(res->second.begin(), res->second.end(), Trim(deps_str));
@@ -315,6 +353,15 @@ bool OhosComponentChecker::InterceptInnerApiVisibilityDenied(const Item *item, c
 bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode* function, const std::string label,
     const std::string deps, Err *err) const
 {
+    if (auto res = fuzzy_match_.find("deps_gni"); res != fuzzy_match_.end()) {
+        std::string deps_str(deps);
+        for (auto res_second : res->second) {
+            if (StartWith(Trim(deps_str), res_second)) {
+                return true;
+            }
+        }
+    }
+
     if (auto res = import_other_.find(label); res != import_other_.end()) {
         std::string deps_str(deps);
         auto res_second = std::find(res->second.begin(), res->second.end(), Trim(deps_str));

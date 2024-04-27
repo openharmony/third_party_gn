@@ -57,7 +57,8 @@ public:
     bool LoadOhosComponents(const std::string &build_dir,
                             const Value *enable, Err *err);
 
-    bool GetExternalDepsLabel(const Value &external_dep, std::string &label, Err *err) const;
+    bool GetExternalDepsLabel(const Value &external_dep, std::string &label, int &whole_status, Err *err) const;
+    bool GetPrivateDepsLabel(const Value &dep, std::string &label, int &whole_status, Err *err) const;
     bool GetSubsystemName(const Value &component_name, std::string &subsystem_name, Err *err) const;
 
     const OhosComponent *GetComponentByName(const std::string &component_name) const;

@@ -263,14 +263,18 @@ bool TargetGenerator::FillData() {
 }
 
 bool TargetGenerator::FillDependencies() {
-  if (!FillGenericDeps(variables::kDeps, &target_->private_deps()))
+  if (!FillGenericDepsWithWholeArchive(variables::kDeps, &target_->private_deps(),
+    &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
     return false;
-  if (!FillGenericDeps(variables::kPublicDeps, &target_->public_deps()))
+  if (!FillGenericDepsWithWholeArchive(variables::kPublicDeps, &target_->public_deps(),
+    &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
     return false;
   if (scope_->settings()->build_settings()->is_ohos_components_enabled()) {
-    if (!FillOhosComponentDeps(variables::kExternalDeps, &target_->private_deps()))
+    if (!FillOhosComponentDeps(variables::kExternalDeps, &target_->private_deps(),
+        &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
       return false;
-    if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps()))
+    if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps(),
+        &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
       return false;
   }
   if (!FillGenericDeps(variables::kDataDeps, &target_->data_deps()))
@@ -437,24 +441,36 @@ bool TargetGenerator::FillGenericConfigs(const char* var_name,
   return !err_->has_error();
 }
 
-bool TargetGenerator::FillGenericDeps(const char* var_name,
-                                      LabelTargetVector* dest) {
+bool TargetGenerator::FillGenericDeps(const char* var_name, LabelTargetVector* dest) {
   const Value* value = scope_->GetValue(var_name, true);
   if (value) {
-    ExtractListOfLabelsMapping(target_->label().GetUserVisibleName(false), scope_->settings()->build_settings(),
-                               *value, scope_->GetSourceDir(), ToolchainLabelForScope(scope_), dest, err_);
+    ExtractListOfLabels(scope_->settings()->build_settings(), *value,
+                        scope_->GetSourceDir(), ToolchainLabelForScope(scope_),
+                        dest, err_);
   }
   return !err_->has_error();
 }
 
-bool TargetGenerator::FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest)
+bool TargetGenerator::FillGenericDepsWithWholeArchive(const char* var_name, LabelTargetVector* dest,
+  LabelTargetVector* whole_dest, LabelTargetVector* no_whole_dest) {
+  const Value* value = scope_->GetValue(var_name, true);
+  if (value) {
+    ExtractListOfLabelsMapping(target_->label().GetUserVisibleName(false), scope_->settings()->build_settings(),
+                               *value, scope_->GetSourceDir(), ToolchainLabelForScope(scope_),
+                               dest, whole_dest, no_whole_dest, err_);
+  }
+  return !err_->has_error();
+}
+
+bool TargetGenerator::FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest,
+  LabelTargetVector* whole_dest, LabelTargetVector* no_whole_dest)
 {
   const Value* value = scope_->GetValue(var_name, true);
   if (value) {
     // Append to private deps
     ExtractListOfExternalDeps(scope_->settings()->build_settings(), *value,
                               scope_->GetSourceDir(), ToolchainLabelForScope(scope_),
-                              dest, err_);
+                              dest, whole_dest, no_whole_dest, err_);
   }
   return !err_->has_error();
 }

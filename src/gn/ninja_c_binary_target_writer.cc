@@ -734,6 +734,67 @@ void NinjaCBinaryTargetWriter::WriteLinkerStuff(
   WriteOutputSubstitutions();
   WriteLibsList("solibs", solibs);
   WriteLibsList("rlibs", transitive_rustlibs);
+
+  const Toolchain *toolchain = target_->toolchain();
+  if (toolchain == nullptr || toolchain->GetToolAsC(CTool::kCToolSolink) == nullptr) {
+    return;
+  }
+  int toolchain_whole_status = toolchain->GetToolAsC(CTool::kCToolSolink)->toolchain_whole_status();
+  if (toolchain_whole_status == 0) {
+    WriteWholeArchive(toolchain_whole_status);
+  } else if (toolchain_whole_status == 1){
+    WriteNoWholeArchive(toolchain_whole_status);
+  }
+  return;
+}
+
+void NinjaCBinaryTargetWriter::WriteWholeArchive(int toolchain_whole_status) {
+
+  if (target_->whole_archive_deps().size() == 0) {
+    return;
+  }
+  std::string result;
+  for (const auto& file : target_->whole_archive_deps()) {
+    std::string label = file.label.GetUserVisibleName(false);
+    size_t sep = label.find(":");
+    if (sep == std::string::npos) {
+      continue;
+    }
+    result +=  label.substr(sep + 1) + ".a";
+    result += " ";
+  }
+
+  out_ << "  toolchain_whole_status = "
+       << toolchain_whole_status;
+  out_ << std::endl;
+
+  out_ << "  whole-archive = "
+       << result;
+  out_ << std::endl;
+}
+
+void NinjaCBinaryTargetWriter::WriteNoWholeArchive(int toolchain_whole_status) {
+  if (target_->no_whole_archive_deps().size() == 0) {
+    return;
+  }
+  std::string result;
+  for (const auto& file : target_->no_whole_archive_deps()) {
+    std::string label = file.label.GetUserVisibleName(false);
+    size_t sep = label.find(":");
+    if (sep == std::string::npos) {
+      continue;
+    }
+    result +=  label.substr(sep + 1) + ".a";
+    result += " ";
+  }
+
+  out_ << "  toolchain_whole_status = "
+       << toolchain_whole_status;
+  out_ << std::endl;
+
+  out_ << "  no-whole-archive = "
+       << result;
+  out_ << std::endl;
 }
 
 void NinjaCBinaryTargetWriter::WriteOutputSubstitutions() {

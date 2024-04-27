@@ -91,6 +91,8 @@ class CTool : public Tool {
     return !link_output_.empty() || !depend_output_.empty();
   }
 
+  int toolchain_whole_status() const { return toolchain_whole_status_; }
+
  private:
   // Initialization functions -------------------------------------------------
   //
@@ -118,6 +120,7 @@ class CTool : public Tool {
   PrecompiledHeaderType precompiled_header_type_;
   SubstitutionPattern link_output_;
   SubstitutionPattern depend_output_;
+  int toolchain_whole_status_ = -1;
 
   CTool(const CTool&) = delete;
   CTool& operator=(const CTool&) = delete;

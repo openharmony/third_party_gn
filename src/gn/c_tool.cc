@@ -213,6 +213,14 @@ bool CTool::InitTool(Scope* scope, Toolchain* toolchain, Err* err) {
     }
   }
 
+
+  if (name_ == kCToolSolink) {
+    const Value* v = scope->GetValue("toolchain_whole_archive", true);
+    if (v != nullptr && v->type() == Value::Type::BOOLEAN) {
+        toolchain_whole_status_ = v->boolean_value() ? 1 : 0;
+    }
+  }
+
   // Validate link_output and depend_output.
   if (!ValidateLinkAndDependOutput(link_output(), "link_output", err)) {
     return false;

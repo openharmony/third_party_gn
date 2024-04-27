@@ -91,6 +91,10 @@ class NinjaCBinaryTargetWriter : public NinjaBinaryTargetWriter {
   void WriteLibsList(const std::string& label,
                      const std::vector<OutputFile>& libs);
 
+  // Writes whole-archive and no-whole-archive.
+  void WriteWholeArchive(int toolchain_whole_status);
+  void WriteNoWholeArchive(int toolchain_whole_status);
+
   // Writes the implicit dependencies for the link or stamp line. This is
   // the "||" and everything following it on the ninja line.
   //

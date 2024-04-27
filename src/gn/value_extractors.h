@@ -62,6 +62,8 @@ bool ExtractListOfLabelsMapping(const std::string& label,
                                 const SourceDir& current_dir,
                                 const Label& current_toolchain,
                                 LabelTargetVector* dest,
+                                LabelTargetVector* whole_dest,
+                                LabelTargetVector* no_whole_dest,
                                 Err* err);
 
 bool ExtractListOfExternalDeps(const BuildSettings* build_settings,
@@ -69,6 +71,8 @@ bool ExtractListOfExternalDeps(const BuildSettings* build_settings,
                                const SourceDir& current_dir,
                                const Label& current_toolchain,
                                LabelTargetVector* dest,
+                               LabelTargetVector* whole_dest,
+                               LabelTargetVector* no_whole_dest,
                                Err* err);
 
 // Extracts the list of labels and their origins to the given vector. For the
