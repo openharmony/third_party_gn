@@ -100,7 +100,12 @@ const std::string OhosComponentMapping::MappingTargetAbsoluteDpes(const BuildSet
         return "";
     }
 
-    const OhosComponent *deps_component = build_settings->GetOhosComponent(deps);
+    std::string deps_without_tool = deps;
+    size_t tool_sep = deps.find("(");
+    if (tool_sep != std::string::npos) {
+        deps_without_tool = deps.substr(0, tool_sep);
+    }
+    const OhosComponent *deps_component = build_settings->GetOhosComponent(deps_without_tool);
     if (deps_component == nullptr) {
         return "";
     }

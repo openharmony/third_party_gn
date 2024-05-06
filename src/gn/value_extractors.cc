@@ -242,7 +242,7 @@ struct LabelPtrResolverMapping {
     }
 
     std::string dep_label;
-    if (!build_settings->GetPrivateDepsLabel(v, dep_label, whole_status, err)) {
+    if (!build_settings->GetPrivateDepsLabel(v, dep_label, current_toolchain, whole_status, err)) {
       return false;
     }
 
@@ -307,7 +307,7 @@ struct ExternalDepPtrResolver {
       return false;
     }
     std::string label;
-    if (!build_settings->GetExternalDepsLabel(v, label, whole_status, err)) {
+    if (!build_settings->GetExternalDepsLabel(v, label, current_toolchain, whole_status, err)) {
       return false;
     }
     Value external_dep(v.origin(), label);

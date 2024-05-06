@@ -60,9 +60,9 @@ class BuildSettings {
   // OpenHarmony components manager.
   void SetOhosComponentsInfo(OhosComponents *ohos_components);
   bool GetExternalDepsLabel(const Value& external_dep, std::string& label,
-    int &whole_status, Err* err) const;
+    const Label& current_toolchain, int &whole_status, Err* err) const;
   bool GetPrivateDepsLabel(const Value &dep, std::string &label,
-    int &whole_status, Err *err) const;
+    const Label& current_toolchain, int &whole_status, Err *err) const;
   bool is_ohos_components_enabled() const;
   const OhosComponent *GetOhosComponent(const std::string& label) const;
 
