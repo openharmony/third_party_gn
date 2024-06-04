@@ -4,12 +4,15 @@
 
 #include "gn/commands.h"
 
+#include <fstream>
 #include <optional>
 
 #include "base/command_line.h"
 #include "base/environment.h"
+#include "base/files/file_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "gn/builder.h"
 #include "gn/config_values_extractors.h"
@@ -17,10 +20,12 @@
 #include "gn/item.h"
 #include "gn/label.h"
 #include "gn/label_pattern.h"
+#include "gn/ninja_build_writer.h"
 #include "gn/setup.h"
 #include "gn/standard_out.h"
 #include "gn/switches.h"
 #include "gn/target.h"
+#include "util/atomic_write.h"
 #include "util/build_config.h"
 
 namespace commands {
@@ -197,9 +202,28 @@ bool ApplyTypeFilter(std::vector<const Target*>* targets) {
   return true;
 }
 
-// Returns the file path generating this item.
+// Returns the file path of the BUILD.gn file generating this item.
 base::FilePath BuildFileForItem(const Item* item) {
-  return item->defined_from()->GetRange().begin().file()->physical_name();
+  // Find the only BUILD.gn file listed in build_dependency_files() for
+  // this Item. This may not exist if the item is defined in BUILDCONFIG.gn
+  // instead, so account for this too.
+  const SourceFile* buildconfig_gn = nullptr;
+  const SourceFile* build_gn = nullptr;
+  for (const SourceFile& build_file : item->build_dependency_files()) {
+    const std::string& name = build_file.GetName();
+    if (name == "BUILDCONFIG.gn") {
+      buildconfig_gn = &build_file;
+    } else if (name == "BUILD.gn") {
+      build_gn = &build_file;
+      break;
+    }
+  }
+  if (!build_gn)
+    build_gn = buildconfig_gn;
+
+  CHECK(build_gn) << "No BUILD.gn or BUILDCONFIG.gn file defining "
+                  << item->label().GetUserVisibleName(true);
+  return build_gn->Resolve(item->settings()->build_settings()->root_path());
 }
 
 void PrintTargetsAsBuildfiles(const std::vector<const Target*>& targets,
@@ -303,8 +327,7 @@ std::optional<HowTargetContainsFile> TargetContainsFile(
   for (const auto& cur_file : target->data()) {
     if (cur_file == file.value())
       return HowTargetContainsFile::kData;
-    if (cur_file.back() == '/' &&
-        base::StartsWith(file.value(), cur_file, base::CompareCase::SENSITIVE))
+    if (cur_file.back() == '/' && file.value().starts_with(cur_file))
       return HowTargetContainsFile::kData;
   }
 
@@ -323,6 +346,14 @@ std::optional<HowTargetContainsFile> TargetContainsFile(
       return HowTargetContainsFile::kOutput;
   }
   return std::nullopt;
+}
+
+std::string ToUTF8(base::FilePath::StringType in) {
+#if defined(OS_WIN)
+  return base::UTF16ToUTF8(in);
+#else
+  return in;
+#endif
 }
 
 }  // namespace
@@ -374,14 +405,14 @@ bool CommandSwitches::Init(const base::CommandLine& cmdline) {
 // static
 const CommandSwitches& CommandSwitches::Get() {
   CHECK(s_global_switches_.is_initialized())
-      << "Missing previous succesful call to CommandSwitches::Init()";
+      << "Missing previous successful call to CommandSwitches::Init()";
   return s_global_switches_;
 }
 
 // static
 CommandSwitches CommandSwitches::Set(CommandSwitches new_switches) {
   CHECK(s_global_switches_.is_initialized())
-      << "Missing previous succesful call to CommandSwitches::Init()";
+      << "Missing previous successful call to CommandSwitches::Init()";
   CommandSwitches result = std::move(s_global_switches_);
   s_global_switches_ = std::move(new_switches);
   return result;
@@ -395,7 +426,7 @@ bool CommandSwitches::InitFrom(const base::CommandLine& cmdline) {
   result.has_all_ = cmdline.HasSwitch("all");
   result.has_blame_ = cmdline.HasSwitch("blame");
   result.has_tree_ = cmdline.HasSwitch("tree");
-  result.has_format_json_ = cmdline.GetSwitchValueASCII("format") == "json";
+  result.has_format_json_ = cmdline.GetSwitchValueString("format") == "json";
   result.has_default_toolchain_ =
       cmdline.HasSwitch(switches::kDefaultToolchain);
 
@@ -406,7 +437,7 @@ bool CommandSwitches::InitFrom(const base::CommandLine& cmdline) {
 
   std::string_view target_print_switch = "as";
   if (cmdline.HasSwitch(target_print_switch)) {
-    std::string value = cmdline.GetSwitchValueASCII(target_print_switch);
+    std::string value = cmdline.GetSwitchValueString(target_print_switch);
     if (value == "buildfile") {
       result.target_print_mode_ = TARGET_PRINT_BUILDFILE;
     } else if (value == "label") {
@@ -425,7 +456,7 @@ bool CommandSwitches::InitFrom(const base::CommandLine& cmdline) {
 
   std::string_view target_type_switch = "type";
   if (cmdline.HasSwitch(target_type_switch)) {
-    std::string value = cmdline.GetSwitchValueASCII(target_type_switch);
+    std::string value = cmdline.GetSwitchValueString(target_type_switch);
     static const struct {
       const char* name;
       Target::OutputType type;
@@ -454,11 +485,11 @@ bool CommandSwitches::InitFrom(const base::CommandLine& cmdline) {
   }
   std::string_view testonly_switch = "testonly";
   if (cmdline.HasSwitch(testonly_switch)) {
-    std::string value = cmdline.GetSwitchValueASCII(testonly_switch);
+    std::string value = cmdline.GetSwitchValueString(testonly_switch);
     if (value == "true") {
-      testonly_mode_ = TESTONLY_TRUE;
+      result.testonly_mode_ = TESTONLY_TRUE;
     } else if (value == "false") {
-      testonly_mode_ = TESTONLY_FALSE;
+      result.testonly_mode_ = TESTONLY_FALSE;
     } else {
       Err(Location(), "Bad value for --testonly.",
           "I was expecting --testonly=true or --testonly=false.")
@@ -467,10 +498,56 @@ bool CommandSwitches::InitFrom(const base::CommandLine& cmdline) {
     }
   }
 
-  result.meta_rebase_dir_ = cmdline.GetSwitchValueASCII("rebase");
-  result.meta_data_keys_ = cmdline.GetSwitchValueASCII("data");
-  result.meta_walk_keys_ = cmdline.GetSwitchValueASCII("walk");
+  result.meta_rebase_dir_ = cmdline.GetSwitchValueString("rebase");
+  result.meta_data_keys_ = cmdline.GetSwitchValueString("data");
+  result.meta_walk_keys_ = cmdline.GetSwitchValueString("walk");
   *this = result;
+  return true;
+}
+
+bool PrepareForRegeneration(const BuildSettings* settings) {
+  // Write a .d file for the build which references a nonexistent file.
+  // This will make Ninja always mark the build as dirty.
+  base::FilePath build_ninja_d_file(settings->GetFullPath(
+      SourceFile(settings->build_dir().value() + "build.ninja.d")));
+  std::string dummy_depfile("build.ninja.stamp: nonexistent_file.gn\n");
+  if (util::WriteFileAtomically(build_ninja_d_file, dummy_depfile.data(),
+                                static_cast<int>(dummy_depfile.size())) == -1) {
+    Err(Location(), std::string("Failed to write build.ninja.d."))
+        .PrintToStdout();
+    return false;
+  }
+
+  // Write a stripped down build.ninja file with just the commands needed
+  // for ninja to call GN and regenerate ninja files.
+  base::FilePath build_ninja_path(settings->GetFullPath(
+      SourceFile(settings->build_dir().value() + "build.ninja")));
+  std::ifstream build_ninja_file(ToUTF8(build_ninja_path.value()));
+  if (!build_ninja_file) {
+    // Couldn't open the build.ninja file.
+    Err(Location(), "Couldn't open build.ninja in this directory.",
+        "Try running \"gn gen\" on it and then re-running \"gn clean\".")
+        .PrintToStdout();
+    return false;
+  }
+  std::string build_commands =
+      NinjaBuildWriter::ExtractRegenerationCommands(build_ninja_file);
+  if (build_commands.empty()) {
+    Err(Location(), "Unexpected build.ninja contents in this directory.",
+        "Try running \"gn gen\" on it and then re-running \"gn clean\".")
+        .PrintToStdout();
+    return false;
+  }
+  // Close build.ninja or else WriteFileAtomically will fail on Windows.
+  build_ninja_file.close();
+  if (util::WriteFileAtomically(build_ninja_path, build_commands.data(),
+                                static_cast<int>(build_commands.size())) ==
+      -1) {
+    Err(Location(), std::string("Failed to write build.ninja."))
+        .PrintToStdout();
+    return false;
+  }
+
   return true;
 }
 

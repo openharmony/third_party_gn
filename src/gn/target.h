@@ -100,6 +100,9 @@ class Target : public Item {
   // increases parallelism.
   bool IsDataOnly() const;
 
+  // Return true if this target should be generated in the final build graph.
+  bool ShouldGenerate() const;
+
   // Will be the empty string to use the target label as the output name.
   // See GetComputedOutputName().
   const std::string& output_name() const { return output_name_; }
@@ -164,13 +167,13 @@ class Target : public Item {
     complete_static_lib_ = complete;
   }
 
-    // Whether this copy target is linkable.
-    bool copy_linkable_file() const { return copy_linkable_file_; }
-    void set_copy_linkable_file(bool linkable)
-    {
-        DCHECK_EQ(COPY_FILES, output_type_);
-        copy_linkable_file_ = linkable;
-    }
+  // Whether this copy target is linkable.
+  bool copy_linkable_file() const { return copy_linkable_file_; }
+  void set_copy_linkable_file(bool linkable)
+  {
+      DCHECK_EQ(COPY_FILES, output_type_);
+      copy_linkable_file_ = linkable;
+  }
 
   // Metadata. Target takes ownership of the resulting scope.
   const Metadata& metadata() const;
@@ -313,6 +316,10 @@ class Target : public Item {
   const InheritedLibraries& inherited_libraries() const {
     return inherited_libraries_;
   }
+
+  // Pool option
+  const LabelPtrPair<Pool>& pool() const { return pool_; }
+  void set_pool(LabelPtrPair<Pool> pool) { pool_ = std::move(pool); }
 
   // This config represents the configuration set directly on this target.
   ConfigValues& config_values();
@@ -532,6 +539,8 @@ class Target : public Item {
   // All hard deps from this target and all dependencies. Filled in when this
   // target is marked resolved. This will not include the current target.
   TargetSet recursive_hard_deps_;
+
+  LabelPtrPair<Pool> pool_;
 
   std::vector<LabelPattern> friends_;
   std::vector<LabelPattern> assert_no_deps_;

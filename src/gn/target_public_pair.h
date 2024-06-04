@@ -5,26 +5,43 @@
 #ifndef TOOLS_GN_TARGET_PUBLIC_PAIR_H_
 #define TOOLS_GN_TARGET_PUBLIC_PAIR_H_
 
-#include "gn/immutable_vector.h"
-#include "gn/tagged_pointer.h"
 #include "gn/unique_vector.h"
 
 class Target;
 
-// A Compact encoding for a (target_ptr, is_public_flag) pair.
+// C++ and Rust target resolution requires computing uniquified and
+// ordered lists of static/shared libraries that are collected through
+// the target's dependency tree.
+//
+// Maintaining the order is important to ensure the libraries are linked
+// in the correct order in the final link command line.
+//
+// Also each library must only appear once in the final list, even though
+// it may appear multiple times during the dependency tree walk, either as
+// a "private" or "public" dependency.
+//
+// The TargetPublicPair class below encodes a (target_ptr, is_public_flag)
+// pair, with convenience accessors and utility structs.
+//
+// The TargetPublicPairListBuilder is a builder-pattern class that generates
+// a unique vector of TargetPublicPair values (i.e. the final list described
+// above), and supporting the special logic required to build these lists
+// (see the comments for its Append() and AppendInherited() methods).
+//
+// A convenience encoding for a (target_ptr, is_public_flag) pair.
 class TargetPublicPair {
  public:
   TargetPublicPair() = default;
   TargetPublicPair(const Target* target, bool is_public)
-      : pair_(target, static_cast<unsigned>(is_public)) {}
+      : target_(target), is_public_(is_public) {}
   TargetPublicPair(std::pair<const Target*, bool> pair)
-      : pair_(pair.first, static_cast<unsigned>(pair.second)) {}
+      : target_(pair.first), is_public_(pair.second) {}
 
-  const Target* target() const { return pair_.ptr(); }
-  void set_target(const Target* target) { pair_.set_ptr(target); }
+  const Target* target() const { return target_; }
+  void set_target(const Target* target) { target_ = target; }
 
-  bool is_public() const { return pair_.tag() != 0; }
-  void set_is_public(bool is_public) { pair_.set_tag(is_public ? 1 : 0); }
+  bool is_public() const { return is_public_; }
+  void set_is_public(bool is_public) { is_public_ = is_public; }
 
   // Utility structs that can be used to instantiante containers
   // that only use the target for lookups / comparisons. E.g.
@@ -54,15 +71,19 @@ class TargetPublicPair {
   };
 
  private:
-  TaggedPointer<const Target, 1> pair_;
+  const Target* target_ = nullptr;
+  bool is_public_ = false;
 };
 
-// A helper type to build a list of (target, is_public) pairs, where target
-// pointers are unique. Usage is:
+// A helper type to build a uniquified ordered vector of TargetPublicPair
+// instances. Usage is:
 //
 //   1) Create builder instance.
-//   2) Call Append() or AppendInherited() as many times as necessary.
-//   3) Call Build() to retrieve final list as an immutable vector.
+//
+//   2) Call Append() to add a direct dependency, or AppendInherited() to add
+//      transitive ones, as many times as necessary.
+//
+//   3) Call Build() to retrieve final list as a vector.
 //
 class TargetPublicPairListBuilder
     : public UniqueVector<TargetPublicPair,
@@ -70,7 +91,7 @@ class TargetPublicPairListBuilder
                           TargetPublicPair::TargetEqualTo> {
  public:
   // Add (target, is_public) to the list being constructed. If the target
-  // was not already in the list, recorded the |is_public| flag as is,
+  // was not already in the list, record the |is_public| flag as is,
   // otherwise, set the recorded flag to true only if |is_public| is true, or
   // don't do anything otherwise.
   void Append(const Target* target, bool is_public) {
@@ -103,9 +124,8 @@ class TargetPublicPairListBuilder
     }
   }
 
-  ImmutableVector<TargetPublicPair> Build() {
-    return ImmutableVector<TargetPublicPair>(release());
-  }
+  // Build and return the final list to the caller.
+  std::vector<TargetPublicPair> Build() { return release(); }
 };
 
 #endif  // TOOLS_GN_TARGET_PUBLIC_PAIR_H_

@@ -72,7 +72,7 @@ class Item {
   // returns false on failure.
   virtual bool OnResolved(Err* err);
 
-  const OhosComponent *ohos_component() const { return component; };
+  const OhosComponent *ohos_component() const { return component; }
 
  private:
   bool CheckTestonly(Err* err) const;
