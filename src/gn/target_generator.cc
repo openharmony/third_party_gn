@@ -169,12 +169,10 @@ void TargetGenerator::GenerateTarget(Scope* scope,
     *err = Err(function_call, "Can't define a target in this context.");
     return;
   }
-
   InnerApiPublicInfoGenerator* instance = InnerApiPublicInfoGenerator::getInstance();
   if (instance != nullptr) {
     instance->GeneratedInnerapiPublicInfo(target.get(), label, scope, output_type, err);
   }
-
   collector->push_back(std::move(target));
 }
 
@@ -441,7 +439,8 @@ bool TargetGenerator::FillGenericConfigs(const char* var_name,
   return !err_->has_error();
 }
 
-bool TargetGenerator::FillGenericDeps(const char* var_name, LabelTargetVector* dest) {
+bool TargetGenerator::FillGenericDeps(const char* var_name,
+                                      LabelTargetVector* dest) {
   const Value* value = scope_->GetValue(var_name, true);
   if (value) {
     ExtractListOfLabels(scope_->settings()->build_settings(), *value,
@@ -474,6 +473,7 @@ bool TargetGenerator::FillOhosComponentDeps(const char* var_name, LabelTargetVec
   }
   return !err_->has_error();
 }
+
 bool TargetGenerator::FillWriteRuntimeDeps() {
   const Value* value = scope_->GetValue(variables::kWriteRuntimeDeps, true);
   if (!value)

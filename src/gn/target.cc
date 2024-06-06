@@ -44,12 +44,16 @@ void MergeAllDependentConfigsFrom(const Target* from_target,
 }
 
 Err MakeTestOnlyError(const Item* from, const Item* to) {
+  bool with_toolchain = from->settings()->ShouldShowToolchain({
+      &from->label(),
+      &to->label(),
+  });
   return Err(
       from->defined_from(), "Test-only dependency not allowed.",
-      from->label().GetUserVisibleName(false) +
+      from->label().GetUserVisibleName(with_toolchain) +
           "\n"
           "which is NOT marked testonly can't depend on\n" +
-          to->label().GetUserVisibleName(false) +
+          to->label().GetUserVisibleName(with_toolchain) +
           "\n"
           "which is marked testonly. Only targets with \"testonly = true\"\n"
           "can depend on other test-only targets.\n"
@@ -128,7 +132,7 @@ bool EnsureFileIsGeneratedByDependency(const Target* target,
         return true;  // Found a path.
     }
     if (target->output_type() == Target::CREATE_BUNDLE) {
-      for (auto* dep : target->bundle_data().bundle_deps()) {
+      for (const auto* dep : target->bundle_data().bundle_deps()) {
         if (EnsureFileIsGeneratedByDependency(dep, file, false,
                                               consider_object_files,
                                               check_data_deps, seen_targets))
@@ -479,29 +483,9 @@ bool Target::OnResolved(Err* err) {
                              dep.ptr->public_configs().end());
   }
 
-  // Copy our own libs and lib_dirs to the final set. This will be from our
-  // target and all of our configs. We do this specially since these must be
-  // inherited through the dependency tree (other flags don't work this way).
-  //
-  // This needs to happen after we pull dependent target configs for the
-  // public config's libs to be included here. And it needs to happen
-  // before pulling the dependent target libs so the libs are in the correct
-  // order (local ones first, then the dependency's).
-  for (ConfigValuesIterator iter(this); !iter.done(); iter.Next()) {
-    const ConfigValues& cur = iter.cur();
-    all_lib_dirs_.Append(cur.lib_dirs().begin(), cur.lib_dirs().end());
-    all_libs_.Append(cur.libs().begin(), cur.libs().end());
-
-    all_framework_dirs_.Append(cur.framework_dirs().begin(),
-                               cur.framework_dirs().end());
-    all_frameworks_.Append(cur.frameworks().begin(), cur.frameworks().end());
-    all_weak_frameworks_.Append(cur.weak_frameworks().begin(),
-                                cur.weak_frameworks().end());
-  }
+  
 
   PullRecursiveBundleData();
-  PullDependentTargetLibs();
-  PullRecursiveHardDeps();
   if (!ResolvePrecompiledHeaders(err))
     return false;
 
@@ -565,6 +549,15 @@ bool Target::IsDataOnly() const {
   return output_type_ == BUNDLE_DATA;
 }
 
+bool Target::ShouldGenerate() const {
+  const auto& root_patterns = settings()->build_settings()->root_patterns();
+  if (root_patterns.empty()) {
+    // By default, generate all targets that belong to the default toolchain.
+    return settings()->is_default();
+  }
+  return LabelPattern::VectorMatches(root_patterns, label());
+}
+
 DepsIteratorRange Target::GetDeps(DepsIterationType type) const {
   if (type == DEPS_LINKED) {
     return DepsIteratorRange(
@@ -587,9 +580,7 @@ std::string Target::GetComputedOutputName() const {
   if (tool) {
     // Only add the prefix if the name doesn't already have it and it's not
     // being overridden.
-    if (!output_prefix_override_ &&
-        !base::StartsWith(name, tool->output_prefix(),
-                          base::CompareCase::SENSITIVE))
+    if (!output_prefix_override_ && !name.starts_with(tool->output_prefix()))
       result = tool->output_prefix();
   }
   result.append(name);
@@ -758,6 +749,7 @@ void Target::PullDependentTargetConfigs() {
   }
 }
 
+
 void Target::PullDependentTargetLibsFrom(const Target* dep, bool is_public) {
   // Direct dependent libraries.
   if (dep->output_type() == STATIC_LIBRARY ||
@@ -909,24 +901,27 @@ void Target::PullRecursiveHardDeps() {
 }
 
 void Target::PullRecursiveBundleData() {
+  const bool is_create_bundle = output_type_ == CREATE_BUNDLE;
   for (const auto& pair : GetDeps(DEPS_LINKED)) {
-    // Don't propagate bundle_data once they are added to a bundle.
-    if (pair.ptr->output_type() == CREATE_BUNDLE)
-      continue;
-
     // Don't propagate across toolchain.
     if (pair.ptr->toolchain() != toolchain())
       continue;
 
+    // Don't propagete through create_bundle, unless it is transparent.
+    if (pair.ptr->output_type() == CREATE_BUNDLE &&
+        !pair.ptr->bundle_data().transparent()) {
+      continue;
+    }
+
     // Direct dependency on a bundle_data target.
     if (pair.ptr->output_type() == BUNDLE_DATA) {
-      bundle_data().AddBundleData(pair.ptr);
+      bundle_data().AddBundleData(pair.ptr, is_create_bundle);
     }
 
     // Recursive bundle_data informations from all dependencies.
     if (pair.ptr->has_bundle_data()) {
-      for (auto* target : pair.ptr->bundle_data().bundle_deps())
-        bundle_data().AddBundleData(target);
+      for (const auto* target : pair.ptr->bundle_data().forwarded_bundle_deps())
+        bundle_data().AddBundleData(target, is_create_bundle);
     }
   }
 
@@ -1096,19 +1091,24 @@ bool Target::ResolvePrecompiledHeaders(Err* err) {
       // Already have a precompiled header values, the settings must match.
       if (config_values_->precompiled_header() != cur.precompiled_header() ||
           config_values_->precompiled_source() != cur.precompiled_source()) {
+        bool with_toolchain = settings()->ShouldShowToolchain({
+            &label(),
+            pch_header_settings_from,
+            &config->label(),
+        });
         *err = Err(
             defined_from(), "Precompiled header setting conflict.",
-            "The target " + label().GetUserVisibleName(false) +
+            "The target " + label().GetUserVisibleName(with_toolchain) +
                 "\n"
                 "has conflicting precompiled header settings.\n"
                 "\n"
                 "From " +
-                pch_header_settings_from->GetUserVisibleName(false) +
+                pch_header_settings_from->GetUserVisibleName(with_toolchain) +
                 "\n  header: " + config_values_->precompiled_header() +
                 "\n  source: " + config_values_->precompiled_source().value() +
                 "\n\n"
                 "From " +
-                config->label().GetUserVisibleName(false) +
+                config->label().GetUserVisibleName(with_toolchain) +
                 "\n  header: " + cur.precompiled_header() +
                 "\n  source: " + cur.precompiled_source().value());
         return false;
@@ -1145,7 +1145,7 @@ bool Target::CheckSourceSetLanguages(Err* err) const {
   if (output_type() == Target::SOURCE_SET &&
       source_types_used().RustSourceUsed()) {
     *err = Err(defined_from(), "source_set contained Rust code.",
-               label().GetUserVisibleName(false) +
+               label().GetUserVisibleName(!settings()->is_default()) +
                    " has Rust code. Only C/C++ source_sets are supported.");
     return false;
   }
@@ -1191,7 +1191,7 @@ bool Target::CheckAssertNoDeps(Err* err) const {
                                   &failure_path_str, &failure_pattern)) {
     *err = Err(
         defined_from(), "assert_no_deps failed.",
-        label().GetUserVisibleName(false) +
+        label().GetUserVisibleName(!settings()->is_default()) +
             " has an assert_no_deps entry:\n  " + failure_pattern->Describe() +
             "\nwhich fails for the dependency path:\n" + failure_path_str);
     return false;

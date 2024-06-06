@@ -2,8 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-PYTHON_VERSION_COMPATIBILITY = 'PY3'
-
 DEPS = [
     'recipe_engine/cipd',
     'recipe_engine/context',
@@ -27,7 +25,7 @@ PROPERTIES = {
                 sdk_version=Single(str)),
             default={
                 'sdk_package': 'chrome_internal/third_party/sdk/windows',
-                'sdk_version': 'uploaded:2019-09-06'
+                'sdk_version': 'uploaded:2024-01-11',
             },
         )
 }

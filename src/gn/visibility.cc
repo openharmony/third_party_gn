@@ -90,8 +90,7 @@ std::unique_ptr<base::Value> Visibility::AsValue() const {
 }
 
 // static
-bool Visibility::CheckItemVisibility(const Item *from, const Item *to, bool is_external_deps, Err *err)
-{
+bool Visibility::CheckItemVisibility(const Item *from, const Item *to, bool is_external_deps, Err *err) {
     std::string to_label = to->label().GetUserVisibleName(false);
     std::string from_label = from->label().GetUserVisibleName(false);
     if (!to->visibility().CanSeeMe(from->label())) {

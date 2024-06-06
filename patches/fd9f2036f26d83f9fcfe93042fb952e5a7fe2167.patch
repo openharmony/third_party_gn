@@ -1,18 +1,10 @@
-commit 86087bbf2aa81100e77e44ee4ea096a5d2870088
-Author: chenmudan <chenmudan@huawei.com>
-Date:   Sat Oct 8 20:51:42 2022 +0800
-
-    Revert "Fix output directories for generated source files."
-
-    This reverts commit fd9f2036f26d83f9fcfe93042fb952e5a7fe2167.
-
 diff --git a/src/gn/filesystem_utils.cc b/src/gn/filesystem_utils.cc
-index 7a7078ed..6de3fbdf 100644
+index 58d8cca..5f61443 100644
 --- a/src/gn/filesystem_utils.cc
 +++ b/src/gn/filesystem_utils.cc
-@@ -1025,25 +1025,10 @@ OutputFile GetSubBuildDirAsOutputFile(const BuildDirContext& context,
+@@ -1069,25 +1069,10 @@ OutputFile GetSubBuildDirAsOutputFile(const BuildDirContext& context,
    OutputFile result = GetBuildDirAsOutputFile(context, type);
-
+ 
    if (source_dir.is_source_absolute()) {
 -    std::string_view build_dir = context.build_settings->build_dir().value();
 -    std::string_view source_dir_path = source_dir.value();
@@ -41,7 +33,7 @@ index 7a7078ed..6de3fbdf 100644
      // System-absolute.
      AppendFixedAbsolutePathSuffix(context.build_settings, source_dir, &result);
 diff --git a/src/gn/ninja_c_binary_target_writer_unittest.cc b/src/gn/ninja_c_binary_target_writer_unittest.cc
-index 94761931..6056c368 100644
+index 9476193..6056c36 100644
 --- a/src/gn/ninja_c_binary_target_writer_unittest.cc
 +++ b/src/gn/ninja_c_binary_target_writer_unittest.cc
 @@ -405,18 +405,18 @@ TEST_F(NinjaCBinaryTargetWriterTest, NoHardDepsToNoPublicHeaderTarget) {
@@ -59,11 +51,11 @@ index 94761931..6056c368 100644
        // The order-only dependency here is strictly unnecessary since the
        // sources list this as an order-only dep.
        " || obj/foo/generate.stamp\n";
-
+ 
    std::string obj_str = obj_out.str();
 -  EXPECT_EQ(std::string(obj_expected), obj_str);
 +  EXPECT_EQ(obj_expected, obj_str);
-
+ 
    // A shared library depends on gen_obj, having corresponding header for
    // generated obj.
 @@ -442,7 +442,7 @@ TEST_F(NinjaCBinaryTargetWriterTest, NoHardDepsToNoPublicHeaderTarget) {
@@ -76,7 +68,7 @@ index 94761931..6056c368 100644
        // obj/out/Debug/gen_obj.generated.o has dependency to
        // obj/foo/gen_obj.stamp
 diff --git a/src/gn/substitution_writer_unittest.cc b/src/gn/substitution_writer_unittest.cc
-index eaa521ab..fc3c4469 100644
+index eaa521a..fc3c446 100644
 --- a/src/gn/substitution_writer_unittest.cc
 +++ b/src/gn/substitution_writer_unittest.cc
 @@ -45,12 +45,6 @@ TEST(SubstitutionWriter, ApplyPatternToSource) {
@@ -90,5 +82,5 @@ index eaa521ab..fc3c4469 100644
 -  ASSERT_EQ("//out/Debug/gen/BUILD_DIR/gen/generated_file.tmp", result.value())
 -      << result.value();
  }
-
+ 
  TEST(SubstitutionWriter, ApplyPatternToSourceAsOutputFile) {

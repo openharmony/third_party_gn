@@ -3,8 +3,8 @@
     "Name": "gn",
     "License": "BSD-3-Clause",
     "License File": "LICENSE",
-    "Version Number": "1cdd270be9803dbfcdd0343f6104ad4dc30c38ce",
-    "Owner": "wangweichao2@huawei.com",
+    "Version Number": "d823fd85da3fb83146f734377da454473b93a2b2",
+    "Owner": "huhao51@huawei.com",
     "Upstream URL": "https://gn.googlesource.com/gn.git",
     "Description": "GN is a meta-build system that generates build files for Ninja."
   }

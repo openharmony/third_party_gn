@@ -62,7 +62,7 @@ class ResolvedTargetDeps {
     return {deps_.get(), private_count_ + public_count_ + data_count_};
   }
 
-  static std::unique_ptr<const Target* []> Allocate(
+  static std::unique_ptr<const Target*[]> Allocate(
       const LabelTargetVector& public_deps,
       const LabelTargetVector& private_deps,
       const LabelTargetVector& data_deps) {
@@ -79,9 +79,11 @@ class ResolvedTargetDeps {
     return result;
   }
 
-  private : uint32_t public_count_ = 0;
+ private:
+  uint32_t public_count_ = 0;
   uint32_t private_count_ = 0;
   uint32_t data_count_ = 0;
+  // Store the pointers in the following order: public, private, data.
   std::unique_ptr<const Target*[]> deps_;
 };
 

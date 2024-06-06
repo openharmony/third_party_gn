@@ -53,7 +53,7 @@ void CopyTargetGenerator::DoRun() {
         "source_expansion\").");
     return;
   }
-
+  
   if (!FillCopyLinkableFile())
     return;
 }

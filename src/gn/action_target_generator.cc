@@ -5,6 +5,8 @@
 #include "gn/action_target_generator.h"
 
 #include "base/stl_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "gn/build_settings.h"
 #include "gn/config_values_generator.h"
 #include "gn/err.h"
@@ -56,6 +58,9 @@ void ActionTargetGenerator::DoRun() {
     return;
 
   if (!FillDepfile())
+    return;
+
+  if (!FillMnemonic())
     return;
 
   if (!FillPool())
@@ -168,6 +173,29 @@ bool ActionTargetGenerator::FillDepfile() {
   return true;
 }
 
+bool ActionTargetGenerator::FillMnemonic() {
+  const Value* value = scope_->GetValue(variables::kMnemonic, true);
+  if (!value)
+    return true;
+
+  if (!value->VerifyTypeIs(Value::STRING, err_))
+    return false;
+
+  auto s = value->string_value();
+  if (!base::IsStringUTF8(s)) {
+    *err_ = Err(value->origin(), "Mnemonics must be valid UTF-8");
+    return false;
+  }
+  auto widestr = base::UTF8ToUTF16(s);
+  if (std::any_of(widestr.begin(), widestr.end(), base::IsUnicodeWhitespace)) {
+    *err_ = Err(value->origin(), "Mnemonics can't contain whitespace");
+    return false;
+  }
+
+  target_->action_values().mnemonic() = std::move(s);
+  return true;
+}
+
 bool ActionTargetGenerator::FillPool() {
   const Value* value = scope_->GetValue(variables::kPool, true);
   if (!value)
@@ -183,7 +211,7 @@ bool ActionTargetGenerator::FillPool() {
   LabelPtrPair<Pool> pair(label);
   pair.origin = target_->defined_from();
 
-  target_->action_values().set_pool(std::move(pair));
+  target_->set_pool(std::move(pair));
   return true;
 }
 
