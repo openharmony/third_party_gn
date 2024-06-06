@@ -275,8 +275,6 @@ bool TargetGenerator::FillDependencies() {
         &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
       return false;
   }
-  if (!FillGenericDeps(variables::kPublicDeps, &target_->public_deps()))
-    return false;
   if (!FillGenericDeps(variables::kDataDeps, &target_->data_deps()))
     return false;
   if (!FillGenericDeps(variables::kGenDeps, &target_->gen_deps()))
