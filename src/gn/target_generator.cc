@@ -22,6 +22,7 @@
 #include "gn/generated_file_target_generator.h"
 #include "gn/group_target_generator.h"
 #include "gn/innerapis_publicinfo_generator.h"
+#include "gn/install_info_generator.h"
 #include "gn/metadata.h"
 #include "gn/ohos_components.h"
 #include "gn/ohos_variables.h"
@@ -173,6 +174,12 @@ void TargetGenerator::GenerateTarget(Scope* scope,
   if (instance != nullptr) {
     instance->GeneratedInnerapiPublicInfo(target.get(), label, scope, output_type, err);
   }
+
+  InstallInfoGenerator* install_info_instance = InstallInfoGenerator::getInstance();
+  if (install_info_instance != nullptr) {
+    install_info_instance->GeneratedInstallInfo(target.get(), label, scope, output_type, err);
+  }
+
   collector->push_back(std::move(target));
 }
 
