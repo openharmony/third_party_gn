@@ -15,6 +15,7 @@
 #include "gn/err.h"
 #include "gn/filesystem_utils.h"
 #include "gn/innerapis_publicinfo_generator.h"
+#include "gn/install_info_generator.h"
 #include "gn/ohos_components_checker.h"
 #include "gn/ohos_components_impl.h"
 #include "gn/ohos_components_mapping.h"
@@ -527,10 +528,12 @@ void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, con
     if (checkType > OhosComponentChecker::CheckType::INTERCEPT_ALL ||
         checkType <= OhosComponentChecker::CheckType::NONE) {
         InnerApiPublicInfoGenerator::Init(build_dir, 0);
+        InstallInfoGenerator::Init(build_dir, 0);
         return;
     }
     OhosComponentChecker::Init(build_dir, checkType);
     InnerApiPublicInfoGenerator::Init(build_dir, checkType);
+    InstallInfoGenerator::Init(build_dir, checkType);
     return;
 }
 

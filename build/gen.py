@@ -687,6 +687,7 @@ def WriteGNNinja(path, platform, host, options, args_list):
         'src/gn/import_manager.cc',
         'src/gn/inherited_libraries.cc',
         "src/gn/innerapis_publicinfo_generator.cc",
+        "src/gn/install_info_generator.cc",
         'src/gn/input_conversion.cc',
         'src/gn/input_file.cc',
         'src/gn/input_file_manager.cc',

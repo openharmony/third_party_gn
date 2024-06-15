@@ -23,6 +23,7 @@
 #include "gn/substitution_writer.h"
 #include "gn/target.h"
 #include "gn/value.h"
+#include "gn/variables.h"
 
 InnerApiPublicInfoGenerator *InnerApiPublicInfoGenerator::instance_ = nullptr;
 
@@ -136,7 +137,45 @@ static std::string GetIncludeDirsInfo(const Config *config, const OhosComponentC
             return "";
         }
     }
-    info += "\n    ]\n";
+    info += "\n    ]";
+    return info;
+}
+
+static std::string GetFlagsInfo(const Config *config)
+{
+    std::string info;
+
+#define GET_FLAGS_INFO(flags)                                            \
+    const std::vector<std::string> flags = config->own_values().flags(); \
+    if (!flags.empty()) {                                                \
+        info +=",\n    \"";                                              \
+        info += #flags;                                                  \
+        info += "\": [\n      ";                                         \
+        bool first_##flags = true;                                       \
+        for (const std::string &flag : flags) {                          \
+            if (!first_##flags) {                                        \
+                info += ",\n      ";                                     \
+            }                                                            \
+            first_##flags = false;                                       \
+            info += "\"" + flag + "\"";                                  \
+        }                                                                \
+        info += "\n    ]";                                               \
+    }
+
+    GET_FLAGS_INFO(arflags)
+    GET_FLAGS_INFO(asmflags)
+    GET_FLAGS_INFO(cflags)
+    GET_FLAGS_INFO(cflags_c)
+    GET_FLAGS_INFO(cflags_cc)
+    GET_FLAGS_INFO(cflags_objc)
+    GET_FLAGS_INFO(cflags_objcc)
+    GET_FLAGS_INFO(ldflags)
+    GET_FLAGS_INFO(rustflags)
+    GET_FLAGS_INFO(swiftflags)
+
+#undef GET_FLAGS_INFO
+
+    info += "\n";
     return info;
 }
 
@@ -164,6 +203,7 @@ static std::string GetPublicConfigInfo(const PublicConfigInfoParams &params, Sco
             }
             PublicConfigInfoParams params = { target, label, err };
             info += GetIncludeDirsInfo(as_config, checker, isPublic, params);
+            info += GetFlagsInfo(as_config);
         }
         info += "  }";
     }
