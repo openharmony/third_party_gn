@@ -23,13 +23,27 @@ public:
         INTERCEPT_IGNORE_TEST,
         INTERCEPT_ALL
     };
+    enum BinaryLeftShift {
+        UNKNOWN = 0,
+        ALL_DEPS_CONFIG_BINARY,
+        INCLUDE_OVER_RANGE_BINARY,
+        INNERAPI_PUBLIC_DEPS_INNER_BINARY,
+        INNERAPI_NOT_LIB_BINARY,
+        DEPS_NOT_LIB_BINARY,
+        INNERAPI_NOT_DECLARE_BINARY,
+        INCLUDES_ABSOLUTE_DEPS_OTHER_BINARY,
+        TARGET_ABSOLUTE_DEPS_OTHER_BINARY,
+        IMPORT_OTHER_BINARY,
+        INNERAPI_VISIBILITY_DENIED,
+        ALL
+    };
 
-    static void Init(const std::string &build_dir, int checkType)
+    static void Init(const std::string &build_dir, int checkType, unsigned int ruleSwitch)
     {
         if (instance_ != nullptr) {
             return;
         }
-        instance_ = new OhosComponentChecker(build_dir, checkType);
+        instance_ = new OhosComponentChecker(build_dir, checkType, ruleSwitch);
     }
 
     bool CheckAllDepsConfigs(const Target *target, const std::string label, Err *err) const;
@@ -58,6 +72,7 @@ public:
 private:
     int checkType_ = NONE;
     bool ignoreTest_ = true;
+    unsigned int ruleSwitch_;
     std::string build_dir_;
     static OhosComponentChecker *instance_;
     bool InterceptAllDepsConfig(const Target *target, const std::string label, Err *err) const;
@@ -79,7 +94,7 @@ private:
     void GenerateScanList(const std::string path, const std::string subsystem, const std::string component,
         const std::string label, const std::string deps) const;
     OhosComponentChecker() {}
-    OhosComponentChecker(const std::string &build_dir, int checkType);
+    OhosComponentChecker(const std::string &build_dir, int checkType, unsigned int ruleSwitch);
     OhosComponentChecker &operator = (const OhosComponentChecker &) = delete;
 };
 

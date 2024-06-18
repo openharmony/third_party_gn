@@ -26,6 +26,7 @@
 
 static const std::string SCAN_RESULT_PATH = "scan_out";
 static const std::string WHITELIST_PATH = "component_compilation_whitelist.json";
+static const int BASE_BINARY = 1;
 static std::vector<std::string> all_deps_config_;
 static std::vector<std::string> includes_over_range_;
 static std::map<std::string, std::vector<std::string>> innerapi_public_deps_inner_;
@@ -201,8 +202,20 @@ static void LoadWhitelist(const std::string &build_dir)
     return;
 }
 
+static bool IsIntercept(unsigned int switchValue, int shiftLeftNum)
+{
+    if ((switchValue & (BASE_BINARY << (shiftLeftNum - 1))) != 0) {
+        return true;
+    }
+    return false;
+}
+
 bool OhosComponentChecker::InterceptAllDepsConfig(const Target *target, const std::string label, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, ALL_DEPS_CONFIG_BINARY)) {
+        return true;
+    }
+
     auto result = std::find(all_deps_config_.begin(), all_deps_config_.end(), label);
     if (result != all_deps_config_.end()) {
         return true;
@@ -216,6 +229,10 @@ bool OhosComponentChecker::InterceptAllDepsConfig(const Target *target, const st
 bool OhosComponentChecker::InterceptIncludesOverRange(const Target *target, const std::string label,
     const std::string dir, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, INCLUDE_OVER_RANGE_BINARY)) {
+        return true;
+    }
+
     auto result = std::find(includes_over_range_.begin(), includes_over_range_.end(), label);
     if (result != includes_over_range_.end()) {
         return true;
@@ -228,6 +245,10 @@ bool OhosComponentChecker::InterceptIncludesOverRange(const Target *target, cons
 bool OhosComponentChecker::InterceptInnerApiPublicDepsInner(const Target *target, const std::string label,
     const std::string deps, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, INNERAPI_PUBLIC_DEPS_INNER_BINARY)) {
+        return true;
+    }
+
     if (auto res = innerapi_public_deps_inner_.find(label); res != innerapi_public_deps_inner_.end()) {
         std::string deps_str(deps);
         auto res_second = std::find(res->second.begin(), res->second.end(), Trim(deps_str));
@@ -242,6 +263,10 @@ bool OhosComponentChecker::InterceptInnerApiPublicDepsInner(const Target *target
 
 bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::string label, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, INNERAPI_NOT_LIB_BINARY)) {
+        return true;
+    }
+
     auto result = std::find(innerapi_not_lib_.begin(), innerapi_not_lib_.end(), label);
     if (result != innerapi_not_lib_.end()) {
         return true;
@@ -254,6 +279,10 @@ bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::
 bool OhosComponentChecker::InterceptDepsNotLib(const Item *item, const std::string label,
     const std::string deps, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, DEPS_NOT_LIB_BINARY)) {
+        return true;
+    }
+
     if (auto res = fuzzy_match_.find("deps_not_lib"); res != fuzzy_match_.end()) {
         std::string deps_str(deps);
         for (auto res_second : res->second) {
@@ -277,6 +306,10 @@ bool OhosComponentChecker::InterceptDepsNotLib(const Item *item, const std::stri
 
 bool OhosComponentChecker::InterceptInnerApiNotDeclare(const Item *item, const std::string label, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, INNERAPI_NOT_DECLARE_BINARY)) {
+        return true;
+    }
+
     auto result = std::find(innerapi_not_declare_.begin(), innerapi_not_declare_.end(), label);
     if (result != innerapi_not_declare_.end()) {
         return true;
@@ -289,6 +322,10 @@ bool OhosComponentChecker::InterceptInnerApiNotDeclare(const Item *item, const s
 bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *target, const std::string label,
     const std::string includes, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, INCLUDES_ABSOLUTE_DEPS_OTHER_BINARY)) {
+        return true;
+    }
+
     if (auto res = fuzzy_match_.find("deps_includes_absolute"); res != fuzzy_match_.end()) {
         std::string includes_str(includes);
         for (auto res_second : res->second) {
@@ -316,6 +353,10 @@ bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *targ
 bool OhosComponentChecker::InterceptTargetAbsoluteDepsOther(const Item *item, const std::string label,
     const std::string deps, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, TARGET_ABSOLUTE_DEPS_OTHER_BINARY)) {
+        return true;
+    }
+
     if (auto res = fuzzy_match_.find("deps_component_absolute"); res != fuzzy_match_.end()) {
         std::string deps_str(deps);
         for (auto res_second : res->second) {
@@ -342,6 +383,10 @@ bool OhosComponentChecker::InterceptTargetAbsoluteDepsOther(const Item *item, co
 bool OhosComponentChecker::InterceptInnerApiVisibilityDenied(const Item *item, const std::string from_label,
     const std::string to_label, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, INNERAPI_VISIBILITY_DENIED)) {
+        return true;
+    }
+
     *err = Err(item->defined_from(), "InnerApi visibility denied.",
         "The item " + from_label + " cannot dependent  " + to_label +
         "\n"
@@ -353,6 +398,10 @@ bool OhosComponentChecker::InterceptInnerApiVisibilityDenied(const Item *item, c
 bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode* function, const std::string label,
     const std::string deps, Err *err) const
 {
+    if (!IsIntercept(ruleSwitch_, IMPORT_OTHER_BINARY)) {
+        return true;
+    }
+
     if (auto res = fuzzy_match_.find("deps_gni"); res != fuzzy_match_.end()) {
         std::string deps_str(deps);
         for (auto res_second : res->second) {
@@ -374,10 +423,11 @@ bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode* function
     return false;
 }
 
-OhosComponentChecker::OhosComponentChecker(const std::string &build_dir, int checkType)
+OhosComponentChecker::OhosComponentChecker(const std::string &build_dir, int checkType, unsigned int ruleSwitch)
 {
     checkType_ = checkType;
     build_dir_ = build_dir;
+    ruleSwitch_ = ruleSwitch;
     if (checkType_ == CheckType::INTERCEPT_IGNORE_TEST || checkType_ == CheckType::INTERCEPT_ALL) {
         LoadWhitelist(build_dir_);
     }

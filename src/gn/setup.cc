@@ -24,6 +24,7 @@
 #include "gn/filesystem_utils.h"
 #include "gn/input_file.h"
 #include "gn/label_pattern.h"
+#include "gn/ohos_components_checker.h"
 #include "gn/parse_tree.h"
 #include "gn/parser.h"
 #include "gn/source_dir.h"
@@ -450,10 +451,22 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
   }
 
   const Value* checkType = build_settings_.build_args().GetArgOverride("ohos_components_checktype");
-  if (checkType && checkType->type() == Value::INTEGER) {
-      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value());
+  const Value* ruleSwitch = build_settings_.build_args().GetArgOverride("ohos_interception_rule_switch");
+  if (ruleSwitch && ruleSwitch->type() == Value::INTEGER) {
+    if (checkType && checkType->type() == Value::INTEGER) {
+      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value(), ruleSwitch->int_value());
+    } else {
+      ohos_components_.LoadOhosComponentsChecker(build_dir, support,
+          OhosComponentChecker::CheckType::INTERCEPT_IGNORE_TEST, ruleSwitch->int_value());
+    }
   } else {
-      ohos_components_.LoadOhosComponentsChecker(build_dir, support, 0);
+    if (checkType && checkType->type() == Value::INTEGER) {
+      const unsigned int INTERCEPT_ALL_RULE = (1 << (OhosComponentChecker::BinaryLeftShift::ALL - 1)) - 1;
+      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value(), INTERCEPT_ALL_RULE);
+    } else {
+      ohos_components_.LoadOhosComponentsChecker(build_dir, support, OhosComponentChecker::CheckType::NONE,
+          OhosComponentChecker::BinaryLeftShift::UNKNOWN);
+    }
   }
 
   const Value *independent = build_settings_.build_args().GetArgOverride("ohos_indep_compiler_enable");
