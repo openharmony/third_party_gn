@@ -102,7 +102,8 @@ TEST(OhosComponentsImpl, LoadComponentSubsystemAndPaths) {
     Value external_dep(nullptr, "foo:libfoo");
     std::string label;
     int whole_status = -1;
-    ret = mgr->GetExternalDepsLabel(external_dep, label, whole_status, &err);
+    Label current_toolchain;
+    ret = mgr->GetExternalDepsLabel(external_dep, label, current_toolchain, whole_status, &err);
     ASSERT_TRUE(ret);
 
     delete mgr;

@@ -54,11 +54,23 @@ class OhosComponentsImpl {
 public:
     OhosComponentsImpl();
 
-    bool LoadOhosComponents(const std::string &build_dir,
-                            const Value *enable, Err *err);
+    bool isOhosIndepCompilerEnable() const {
+        return is_indep_compiler_enable_;
+    }
 
-    bool GetExternalDepsLabel(const Value &external_dep, std::string &label, int &whole_status, Err *err) const;
-    bool GetPrivateDepsLabel(const Value &dep, std::string &label, int &whole_status, Err *err) const;
+    std::string GetTargetToolchain() const {
+        return toolchain_;
+    }
+
+    void LoadToolchain(const Value *product);
+
+    bool LoadOhosComponents(const std::string &build_dir,
+                            const Value *enable, const Value *indep, const Value *product, Err *err);
+
+    bool GetExternalDepsLabel(const Value &external_dep, std::string &label,
+        const Label& current_toolchain, int &whole_status, Err *err) const;
+    bool GetPrivateDepsLabel(const Value &dep, std::string &label,
+        const Label& current_toolchain, int &whole_status, Err *err) const;
     bool GetSubsystemName(const Value &component_name, std::string &subsystem_name, Err *err) const;
 
     const OhosComponent *GetComponentByName(const std::string &component_name) const;
@@ -70,6 +82,10 @@ private:
     std::map<std::string, OhosComponent *> components_;
 
     std::map<std::string, std::string> override_map_;
+
+    bool is_indep_compiler_enable_ = false;
+
+    std::string toolchain_;
 
     struct OhosComponentTree *pathTree = nullptr;
     void setupComponentsTree();

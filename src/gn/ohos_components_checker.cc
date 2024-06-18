@@ -178,8 +178,10 @@ static void LoadWhitelist(const std::string &build_dir)
 {
     std::string whitelistContent;
     if (!ReadBuildConfigFile(base::FilePath(build_dir + "/" + WHITELIST_PATH), whitelistContent)) {
-        if (!ReadBuildConfigFile(base::FilePath("build/" + WHITELIST_PATH), whitelistContent)) {
-            return;
+        if (!ReadBuildConfigFile(base::FilePath("out/products_ext/" + WHITELIST_PATH), whitelistContent)) {
+            if (!ReadBuildConfigFile(base::FilePath("build/" + WHITELIST_PATH), whitelistContent)) {
+                return;
+            }
         }
     }
     const base::DictionaryValue *whitelist_dict;

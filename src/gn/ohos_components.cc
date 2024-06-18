@@ -304,7 +304,38 @@ void OhosComponentsImpl::LoadOverrideMap(const std::string &override_map)
     return;
 }
 
-bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const Value *enable, Err *err)
+void OhosComponentsImpl::LoadToolchain(const Value *product)
+{
+    if (!product) {
+        return;
+    }
+    std::string path = "out/preloader/" + product->string_value() + "/build_config.json";
+    std::string content;
+    if (!base::ReadFileToString(base::FilePath(path), &content)) {
+        return;
+    }
+
+    const base::DictionaryValue *content_dict;
+    std::unique_ptr<base::Value> content_value = base::JSONReader::ReadAndReturnError(content,
+        base::JSONParserOptions::JSON_PARSE_RFC, nullptr, nullptr, nullptr, nullptr);
+    if (!content_value) {
+        return;
+    }
+    if (!content_value->GetAsDictionary(&content_dict)) {
+        return;
+    }
+    
+    for (const auto com : content_dict->DictItems()) {
+        if (com.first == "product_toolchain_label") {
+            toolchain_ = com.second.GetString();
+            break;
+        }
+    }
+    return;
+}
+
+bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const Value *enable,
+    const Value *indep, const Value *product, Err *err)
 {
     const char *components_file = "parts_info/components.json";
     std::string components_content;
@@ -327,6 +358,10 @@ bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const 
             err_msg_out + "\n");
         return false;
     }
+    if (indep && indep->boolean_value()) {
+        is_indep_compiler_enable_ = true;
+    }
+    LoadToolchain(product);
     return true;
 }
 
@@ -354,7 +389,8 @@ static size_t GetWholeArchiveFlag(std::string str_val, int &whole_status)
     return sep_whole;
 }
 
-bool OhosComponentsImpl::GetPrivateDepsLabel(const Value &dep, std::string &label, int &whole_status, Err *err) const
+bool OhosComponentsImpl::GetPrivateDepsLabel(const Value &dep, std::string &label,
+    const Label& current_toolchain, int &whole_status, Err *err) const
 {
     std::string str_val = dep.string_value();
     size_t sep_whole = GetWholeArchiveFlag(str_val, whole_status);
@@ -363,6 +399,11 @@ bool OhosComponentsImpl::GetPrivateDepsLabel(const Value &dep, std::string &labe
         label = str_val.substr(0, sep_whole);
     } else {
         label = str_val;
+    }
+    std::string current_toolchain_str = current_toolchain.GetUserVisibleName(false);
+    size_t tool_sep = label.find("(");
+    if (tool_sep == std::string::npos && GetTargetToolchain() != current_toolchain_str) {
+        label += "(" + current_toolchain_str + ")";
     }
     if (label == EMPTY_INNERAPI) {
         *err = Err(dep,
@@ -373,7 +414,7 @@ bool OhosComponentsImpl::GetPrivateDepsLabel(const Value &dep, std::string &labe
 }
 
 bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::string &label,
-    int &whole_status, Err *err) const
+    const Label& current_toolchain, int &whole_status, Err *err) const
 {
     std::string str_val = external_dep.string_value();
     size_t sep = str_val.find(":");
@@ -410,7 +451,16 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
         }
     }
 
-    label = component->getInnerApi(innerapi_name) + tool_chain;
+    std::string current_toolchain_str = current_toolchain.GetUserVisibleName(false);
+    if (tool_chain == "" && GetTargetToolchain() != current_toolchain_str) {
+        tool_chain = "(" + current_toolchain_str + ")";
+    }
+    if (isOhosIndepCompilerEnable()) {
+        label = component->getInnerApi(innerapi_name + tool_chain);
+    } else {
+        label = component->getInnerApi(innerapi_name) + tool_chain;
+    }
+
     if (label == EMPTY_INNERAPI) {
         *err = Err(external_dep,
             "OHOS innerapi: (" + innerapi_name + ") not found for component (" + component_name + ").");
@@ -437,7 +487,8 @@ bool OhosComponentsImpl::GetSubsystemName(const Value &component_name, std::stri
 
 OhosComponents::OhosComponents() = default;
 
-bool OhosComponents::LoadOhosComponents(const std::string &build_dir, const Value *enable, Err *err)
+bool OhosComponents::LoadOhosComponents(const std::string &build_dir,
+    const Value *enable, const Value *indep, const Value *product, Err *err)
 {
     if (!enable) {
         // Not enabled
@@ -454,7 +505,7 @@ bool OhosComponents::LoadOhosComponents(const std::string &build_dir, const Valu
 
     mgr = new OhosComponentsImpl();
 
-    if (!mgr->LoadOhosComponents(build_dir, enable, err)) {
+    if (!mgr->LoadOhosComponents(build_dir, enable, indep, product, err)) {
         delete mgr;
         mgr = nullptr;
         return false;
@@ -473,7 +524,7 @@ bool OhosComponents::isOhosComponentsLoaded() const
 }
 
 bool OhosComponents::GetExternalDepsLabel(const Value &external_dep, std::string &label,
-    int &whole_status, Err *err) const
+    const Label& current_toolchain, int &whole_status, Err *err) const
 {
     if (!mgr) {
         if (err) {
@@ -482,10 +533,11 @@ bool OhosComponents::GetExternalDepsLabel(const Value &external_dep, std::string
         }
         return false;
     }
-    return mgr->GetExternalDepsLabel(external_dep, label, whole_status, err);
+    return mgr->GetExternalDepsLabel(external_dep, label, current_toolchain, whole_status, err);
 }
 
-bool OhosComponents::GetPrivateDepsLabel(const Value &dep, std::string &label, int &whole_status, Err *err) const
+bool OhosComponents::GetPrivateDepsLabel(const Value &dep, std::string &label,
+    const Label& current_toolchain, int &whole_status, Err *err) const
 {
     if (!mgr) {
         if (err) {
@@ -494,7 +546,7 @@ bool OhosComponents::GetPrivateDepsLabel(const Value &dep, std::string &label, i
         }
         return false;
     }
-    return mgr->GetPrivateDepsLabel(dep, label, whole_status, err);
+    return mgr->GetPrivateDepsLabel(dep, label, current_toolchain, whole_status, err);
 }
 
 bool OhosComponents::GetSubsystemName(const Value &part_name, std::string &label, Err *err) const

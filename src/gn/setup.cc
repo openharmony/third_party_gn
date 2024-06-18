@@ -441,7 +441,9 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
   // Load OpenHarmony system components definition file.
   const Value *support =
       dotfile_scope_.GetValue("ohos_components_support", true);
-  if (!ohos_components_.LoadOhosComponents(build_dir, support, err)) {
+  const Value *independent = build_settings_.build_args().GetArgOverride("ohos_indep_compiler_enable");
+  const Value *product = build_settings_.build_args().GetArgOverride("product_name");
+  if (!ohos_components_.LoadOhosComponents(build_dir, support, independent, product, err)) {
     return false;
   }
 
@@ -455,8 +457,6 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
   } else {
       ohos_components_.LoadOhosComponentsChecker(build_dir, support, 0);
   }
-
-  const Value *independent = build_settings_.build_args().GetArgOverride("ohos_indep_compiler_enable");
   if (independent) {
       ohos_components_.LoadOhosComponentsMapping(build_dir, support, independent);
   }

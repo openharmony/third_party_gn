@@ -87,23 +87,23 @@ void BuildSettings::SetOhosComponentsInfo(OhosComponents *ohos_components)
 }
 
 bool BuildSettings::GetExternalDepsLabel(const Value& external_dep, std::string& label,
-  int &whole_status, Err* err) const
+  const Label& current_toolchain, int &whole_status, Err* err) const
 {
   if (ohos_components_ == nullptr) {
     *err = Err(external_dep, "You are using OpenHarmony external_deps, but no components information loaded.");
     return false;
   }
-  return ohos_components_->GetExternalDepsLabel(external_dep, label, whole_status, err);
+  return ohos_components_->GetExternalDepsLabel(external_dep, label, current_toolchain, whole_status, err);
 }
 
 bool BuildSettings::GetPrivateDepsLabel(const Value& dep, std::string& label,
-  int &whole_status, Err* err) const
+  const Label& current_toolchain, int &whole_status, Err* err) const
 {
   if (ohos_components_ == nullptr) {
     *err = Err(dep, "Components information not loaded.");
     return false;
   }
-  return ohos_components_->GetPrivateDepsLabel(dep, label, whole_status, err);
+  return ohos_components_->GetPrivateDepsLabel(dep, label, current_toolchain, whole_status, err);
 }
 
 bool BuildSettings::is_ohos_components_enabled() const
