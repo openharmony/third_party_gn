@@ -580,7 +580,7 @@ std::string Target::GetComputedOutputName() const {
   if (tool) {
     // Only add the prefix if the name doesn't already have it and it's not
     // being overridden.
-    if (!output_prefix_override_ && !name.starts_with(tool->output_prefix()))
+    if (!output_prefix_override_ && !base::starts_with(name, tool->output_prefix()))
       result = tool->output_prefix();
   }
   result.append(name);

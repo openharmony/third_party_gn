@@ -116,7 +116,7 @@ void ParseCompilerOption(const std::string& cflag, CompilerOptions* options) {
 // Parses |ldflags| value and stores it in |options|.
 void ParseLinkerOption(const std::string& ldflag, LinkerOptions* options) {
   const char kSubsytemPrefix[] = "/SUBSYSTEM:";
-  if (ldflag.starts_with(kSubsytemPrefix)) {
+  if (base::starts_with(ldflag, kSubsytemPrefix)) {
     const std::string subsystem(
         ldflag.begin() + std::string(kSubsytemPrefix).length(), ldflag.end());
     const std::vector<std::string> tokens = base::SplitString(

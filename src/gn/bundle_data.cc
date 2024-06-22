@@ -21,7 +21,7 @@ SourceFile BundleData::GetAssetsCatalogDirectory(const SourceFile& source) {
   SourceFile assets_catalog_dir;
   std::string_view path = source.value();
   while (!path.empty()) {
-    if (path.ends_with(".xcassets")) {
+    if (base::ends_with(path, ".xcassets")) {
       assets_catalog_dir = SourceFile(path);
     }
 

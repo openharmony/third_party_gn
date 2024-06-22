@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "gn/visual_studio_writer.h"
+#include "gn/config.h"
 
 #include <algorithm>
 #include <iterator>
@@ -916,7 +917,7 @@ void VisualStudioWriter::ResolveSolutionFolders() {
   std::vector<SolutionEntry*> parents;
   for (const std::unique_ptr<SolutionEntry>& folder : folders_) {
     while (!parents.empty()) {
-      if (folder->path.starts_with(parents.back()->path)) {
+      if (base::starts_with(folder->path, parents.back()->path)) {
         folder->parent_folder = parents.back();
         break;
       } else {
