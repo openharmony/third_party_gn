@@ -259,22 +259,8 @@ bool EndsWithCaseInsensitiveASCII(std::string_view str,
                                   std::string_view search_for);
 bool EndsWithCaseInsensitiveASCII(std::u16string_view str,
                                   std::u16string_view search_for);
-bool starts_with(const std::string_view str1, const std::string_view str2) {
-    if (str2.length() > str1.length()) {
-        return false;
-    }
-    return str1.compare(0, str2.length(), str2) == 0;
-}
-
-bool ends_with(const std::string_view str1, const std::string_view str2) {
-    if (str2.empty()) {
-        return true;
-    }
-    if (str1.length() < str2.length()) {
-        return false;
-    }
-    return str1.substr(str1.length() - str2.length()) == str2;
-}
+bool starts_with(std::string_view str1, std::string_view str2);
+bool ends_with(std::string_view str1, std::string_view str2);
 
 // Determines the type of ASCII character, independent of locale (the C
 // library versions will change based on locale).
