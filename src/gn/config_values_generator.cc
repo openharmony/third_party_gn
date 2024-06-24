@@ -148,7 +148,8 @@ void ConfigValuesGenerator::Run() {
 
     // Check for common errors. This is a string and not a file.
     const std::string& pch_string = precompiled_header_value->string_value();
-    if (pch_string.starts_with("//")) {
+//    if (pch_string.starts_with("//")) {
+    if (base::starts_with(pch_string, "//")) {
       *err_ = Err(
           *precompiled_header_value, "This precompiled_header value is wrong. ",
           "You need to specify a string that the compiler will match against\n"

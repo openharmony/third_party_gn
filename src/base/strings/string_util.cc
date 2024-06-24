@@ -126,6 +126,23 @@ std::u16string ToUpperASCII(std::u16string_view str) {
   return ToUpperASCIIImpl<std::u16string>(str);
 }
 
+bool starts_with(const std::string_view str1, const std::string_view str2) {
+    if (str2.length() > str1.length()) {
+        return false;
+    }
+    return str1.compare(0, str2.length(), str2) == 0;
+}
+
+bool ends_with(const std::string_view str1, const std::string_view str2) {
+    if (str2.empty()) {
+        return true;
+    }
+    if (str1.length() < str2.length()) {
+        return false;
+    }
+    return str1.substr(str1.length() - str2.length()) == str2;
+}
+
 template <class StringType>
 int CompareCaseInsensitiveASCIIT(
     std::basic_string_view<typename StringType::value_type> a,
