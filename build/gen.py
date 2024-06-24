@@ -471,7 +471,7 @@ def WriteGNNinja(path, platform, host, options, args_list):
         '-Wno-unused-parameter',
         '-Wextra-semi',
         '-Wundef',
-        '-std=c++17'
+        '-std=c++20'
     ])
     
     if is_gcc(cxx):
@@ -489,7 +489,7 @@ def WriteGNNinja(path, platform, host, options, args_list):
         ldflags.append('-static-libstdc++')
 
       if platform.is_mingw() or platform.is_msys():
-        cflags.remove('-std=c++17')
+        cflags.remove('-std=c++20')
         cflags.extend([
           '-Wno-deprecated-copy',
           '-Wno-implicit-fallthrough',
@@ -498,7 +498,7 @@ def WriteGNNinja(path, platform, host, options, args_list):
           '-Wno-format',             # Use of %llx, which is supported by _UCRT, false positive
           '-Wno-strict-aliasing',    # Dereferencing punned pointer
           '-Wno-cast-function-type', # Casting FARPROC to RegDeleteKeyExPtr
-          '-std=gnu++17',
+          '-std=gnu++20',
         ])
       else:
         # This is needed by libc++.
@@ -570,7 +570,7 @@ def WriteGNNinja(path, platform, host, options, args_list):
         '/wd4505',
         '/wd4838',
         '/wd4996',
-        '/std:c++17',
+        '/std:c++20',
         '/GR-',
         '/D_HAS_EXCEPTIONS=0',
     ])
