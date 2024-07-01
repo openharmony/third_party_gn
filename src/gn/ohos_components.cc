@@ -568,7 +568,8 @@ const OhosComponent *OhosComponents::GetComponentByLabel(const std::string &labe
     return mgr->matchComponentByLabel(label.c_str());
 }
 
-void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, const Value *support, int checkType)
+void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, const Value *support, int checkType,
+    unsigned int ruleSwitch)
 {
     if (!support) {
         return;
@@ -581,7 +582,7 @@ void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, con
         InnerApiPublicInfoGenerator::Init(build_dir, 0);
         return;
     }
-    OhosComponentChecker::Init(build_dir, checkType);
+    OhosComponentChecker::Init(build_dir, checkType, ruleSwitch);
     InnerApiPublicInfoGenerator::Init(build_dir, checkType);
     return;
 }

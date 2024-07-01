@@ -78,7 +78,8 @@ public:
 
     const OhosComponent *GetComponentByLabel(const std::string &label) const;
 
-    void LoadOhosComponentsChecker(const std::string &build_dir, const Value *support, int checkType);
+    void LoadOhosComponentsChecker(const std::string &build_dir, const Value *support, int checkType,
+        unsigned int ruleSwitch);
 
     void LoadOhosComponentsMapping(const std::string& build_dir, const Value *support, const Value *independent);
 
