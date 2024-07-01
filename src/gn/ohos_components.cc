@@ -15,7 +15,6 @@
 #include "gn/err.h"
 #include "gn/filesystem_utils.h"
 #include "gn/innerapis_publicinfo_generator.h"
-#include "gn/install_info_generator.h"
 #include "gn/ohos_components_checker.h"
 #include "gn/ohos_components_impl.h"
 #include "gn/ohos_components_mapping.h"
@@ -273,7 +272,7 @@ void OhosComponentsImpl::LoadInnerApi(const std::string &component_name, const s
     for (const base::Value &kv : innerapis) {
         const base::Value *label = kv.FindKey("label");
         const base::Value *name = kv.FindKey("name");
-       
+
         if (!label || !name) {
             continue;
         }
@@ -324,7 +323,7 @@ void OhosComponentsImpl::LoadToolchain(const Value *product)
     if (!content_value->GetAsDictionary(&content_dict)) {
         return;
     }
-    
+
     for (const auto com : content_dict->DictItems()) {
         if (com.first == "product_toolchain_label") {
             toolchain_ = com.second.GetString();
@@ -580,12 +579,10 @@ void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, con
     if (checkType > OhosComponentChecker::CheckType::INTERCEPT_ALL ||
         checkType <= OhosComponentChecker::CheckType::NONE) {
         InnerApiPublicInfoGenerator::Init(build_dir, 0);
-        InstallInfoGenerator::Init(build_dir, 0);
         return;
     }
     OhosComponentChecker::Init(build_dir, checkType);
     InnerApiPublicInfoGenerator::Init(build_dir, checkType);
-    InstallInfoGenerator::Init(build_dir, checkType);
     return;
 }
 
