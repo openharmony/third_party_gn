@@ -487,6 +487,9 @@ def WriteGNNinja(path, platform, host, options, args_list):
 
       if not options.no_static_libstdcpp:
         ldflags.append('-static-libstdc++')
+      
+      if platform.is_linux():
+        ldflags.append('-Wl,-z,relro,-z,now')
 
       if platform.is_mingw() or platform.is_msys():
         cflags.remove('-std=c++20')
