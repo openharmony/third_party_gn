@@ -445,7 +445,6 @@ bool Analyzer::ItemRefersToFile(const Item* item,
     if (cur_file == file->value())
       return true;
     if (cur_file.back() == '/' && base::starts_with(file->value(), cur_file))
-//    if (cur_file.back() == '/' && file->value().starts_with(cur_file))
       return true;
   }
 
