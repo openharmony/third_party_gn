@@ -24,10 +24,10 @@ public:
         instance_ = new OhosComponentMapping(build_dir);
     }
 
-    const std::string MappingTargetAbsoluteDpes(const BuildSettings* build_settings,
-        const std::string label, const std::string deps) const;
-    const std::string MappingImportOther(const BuildSettings* build_settings,
-        const std::string label, const std::string deps) const;
+    const std::string MappingTargetAbsoluteDpes(const BuildSettings *settings,
+        const std::string &label, const std::string &deps) const;
+    const std::string MappingImportOther(const BuildSettings *settings,
+        const std::string &label, const std::string &deps) const;
 
     static OhosComponentMapping *getInstance()
     {

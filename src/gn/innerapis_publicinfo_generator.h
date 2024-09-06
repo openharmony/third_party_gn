@@ -21,11 +21,13 @@ struct PublicConfigInfoParams {
     const Target *target;
     std::string label;
     Err *err;
+    bool is_public;
 };
 
 class InnerApiPublicInfoGenerator {
 public:
-    void GeneratedInnerapiPublicInfo(Target *target, Label label, Scope *scope, const std::string type, Err *err);
+    void GeneratedInnerapiPublicInfo(const Target *target, const Label &label,
+        Scope *scope, const std::string &type, Err *err);
 
     static InnerApiPublicInfoGenerator *getInstance()
     {

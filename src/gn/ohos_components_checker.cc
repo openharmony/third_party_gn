@@ -40,17 +40,17 @@ static std::map<std::string, std::vector<std::string>> fuzzy_match_;
 
 OhosComponentChecker *OhosComponentChecker::instance_ = nullptr;
 
-static std::string &Trim(std::string &s)
+static std::string& Trim(std::string &str)
 {
-    if (s.empty()) {
-        return s;
+    if (str.empty()) {
+        return str;
     }
-    s.erase(0, s.find_first_not_of(" \t\r\n"));
-    s.erase(s.find_last_not_of(" \t\r\n") + 1);
-    return s;
+    str.erase(0, str.find_first_not_of(" \t\r\n"));
+    str.erase(str.find_last_not_of(" \t\r\n") + 1);
+    return str;
 }
 
-static bool StartWith(const std::string &str, const std::string prefix)
+static bool StartWith(const std::string &str, const std::string &prefix)
 {
     return (str.rfind(prefix, 0) == 0);
 }
@@ -212,7 +212,7 @@ static bool IsIntercept(unsigned int switchValue, int shiftLeftNum)
     return false;
 }
 
-bool OhosComponentChecker::InterceptAllDepsConfig(const Target *target, const std::string label, Err *err) const
+bool OhosComponentChecker::InterceptAllDepsConfig(const Target *target, const std::string &label, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, ALL_DEPS_CONFIG_BINARY)) {
         return true;
@@ -228,8 +228,8 @@ bool OhosComponentChecker::InterceptAllDepsConfig(const Target *target, const st
     return false;
 }
 
-bool OhosComponentChecker::InterceptIncludesOverRange(const Target *target, const std::string label,
-    const std::string dir, Err *err) const
+bool OhosComponentChecker::InterceptIncludesOverRange(const Target *target, const std::string &label,
+    const std::string &dir, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, INCLUDE_OVER_RANGE_BINARY)) {
         return true;
@@ -244,8 +244,8 @@ bool OhosComponentChecker::InterceptIncludesOverRange(const Target *target, cons
     return false;
 }
 
-bool OhosComponentChecker::InterceptInnerApiPublicDepsInner(const Target *target, const std::string label,
-    const std::string deps, Err *err) const
+bool OhosComponentChecker::InterceptInnerApiPublicDepsInner(const Target *target, const std::string &label,
+    const std::string &deps, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, INNERAPI_PUBLIC_DEPS_INNER_BINARY)) {
         return true;
@@ -263,7 +263,7 @@ bool OhosComponentChecker::InterceptInnerApiPublicDepsInner(const Target *target
     return false;
 }
 
-bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::string label, Err *err) const
+bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::string &label, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, INNERAPI_NOT_LIB_BINARY)) {
         return true;
@@ -278,8 +278,8 @@ bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::
     return false;
 }
 
-bool OhosComponentChecker::InterceptDepsNotLib(const Item *item, const std::string label,
-    const std::string deps, Err *err) const
+bool OhosComponentChecker::InterceptDepsNotLib(const Item *item, const std::string &label,
+    const std::string &deps, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, DEPS_NOT_LIB_BINARY)) {
         return true;
@@ -306,7 +306,7 @@ bool OhosComponentChecker::InterceptDepsNotLib(const Item *item, const std::stri
     return false;
 }
 
-bool OhosComponentChecker::InterceptInnerApiNotDeclare(const Item *item, const std::string label, Err *err) const
+bool OhosComponentChecker::InterceptInnerApiNotDeclare(const Item *item, const std::string &label, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, INNERAPI_NOT_DECLARE_BINARY)) {
         return true;
@@ -321,8 +321,8 @@ bool OhosComponentChecker::InterceptInnerApiNotDeclare(const Item *item, const s
     return false;
 }
 
-bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *target, const std::string label,
-    const std::string includes, Err *err) const
+bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *target, const std::string &label,
+    const std::string &includes, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, INCLUDES_ABSOLUTE_DEPS_OTHER_BINARY)) {
         return true;
@@ -352,8 +352,8 @@ bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *targ
 }
 
 
-bool OhosComponentChecker::InterceptTargetAbsoluteDepsOther(const Item *item, const std::string label,
-    const std::string deps, Err *err) const
+bool OhosComponentChecker::InterceptTargetAbsoluteDepsOther(const Item *item, const std::string &label,
+    const std::string &deps, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, TARGET_ABSOLUTE_DEPS_OTHER_BINARY)) {
         return true;
@@ -382,8 +382,8 @@ bool OhosComponentChecker::InterceptTargetAbsoluteDepsOther(const Item *item, co
     return false;
 }
 
-bool OhosComponentChecker::InterceptInnerApiVisibilityDenied(const Item *item, const std::string from_label,
-    const std::string to_label, Err *err) const
+bool OhosComponentChecker::InterceptInnerApiVisibilityDenied(const Item *item, const std::string &from_label,
+    const std::string &to_label, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, INNERAPI_VISIBILITY_DENIED)) {
         return true;
@@ -397,8 +397,8 @@ bool OhosComponentChecker::InterceptInnerApiVisibilityDenied(const Item *item, c
     return false;
 }
 
-bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode* function, const std::string label,
-    const std::string deps, Err *err) const
+bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode *function, const std::string &label,
+    const std::string &deps, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, IMPORT_OTHER_BINARY)) {
         return true;
@@ -439,8 +439,8 @@ OhosComponentChecker::OhosComponentChecker(const std::string &build_dir, int che
     RemoveScanOutDir(build_dir_ + "/" + SCAN_RESULT_PATH);
 }
 
-void OhosComponentChecker::GenerateScanList(const std::string path, const std::string subsystem,
-    const std::string component, const std::string label, const std::string deps) const
+void OhosComponentChecker::GenerateScanList(const std::string &path, const std::string &subsystem,
+    const std::string &component, const std::string &label, const std::string &deps) const
 {
     CreateScanOutDir(build_dir_ + "/" + SCAN_RESULT_PATH);
     std::ofstream file;
@@ -450,7 +450,7 @@ void OhosComponentChecker::GenerateScanList(const std::string path, const std::s
     return;
 }
 
-bool OhosComponentChecker::CheckAllDepsConfigs(const Target *target, const std::string label, Err *err) const
+bool OhosComponentChecker::CheckAllDepsConfigs(const Target *target, const std::string &label, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || target == nullptr || (ignoreTest_ && target->testonly())) {
         return true;
@@ -467,8 +467,8 @@ bool OhosComponentChecker::CheckAllDepsConfigs(const Target *target, const std::
     return true;
 }
 
-bool OhosComponentChecker::CheckInnerApiIncludesOverRange(const Target *target, const std::string label,
-    const std::string dir, Err *err) const
+bool OhosComponentChecker::CheckInnerApiIncludesOverRange(const Target *target, const std::string &label,
+    const std::string &dir, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || target == nullptr || (ignoreTest_ && target->testonly())) {
         return true;
@@ -490,8 +490,8 @@ bool OhosComponentChecker::CheckInnerApiIncludesOverRange(const Target *target, 
     return true;
 }
 
-bool OhosComponentChecker::CheckInnerApiPublicDepsInner(const Target *target, const std::string label,
-    const std::string deps, Err *err) const
+bool OhosComponentChecker::CheckInnerApiPublicDepsInner(const Target *target, const std::string &label,
+    const std::string &deps, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || target == nullptr || (ignoreTest_ && target->testonly())) {
         return true;
@@ -514,7 +514,7 @@ bool OhosComponentChecker::CheckInnerApiPublicDepsInner(const Target *target, co
 }
 
 bool OhosComponentChecker::CheckInnerApiNotLib(const Item *item, const OhosComponent *component,
-    const std::string label, const std::string deps, Err *err) const
+    const std::string &label, const std::string &deps, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || item == nullptr || item->AsTarget() == nullptr ||
         (ignoreTest_ && item->testonly()) || component == nullptr) {
@@ -538,7 +538,7 @@ bool OhosComponentChecker::CheckInnerApiNotLib(const Item *item, const OhosCompo
 }
 
 bool OhosComponentChecker::CheckInnerApiNotDeclare(const Item *item, const OhosComponent *component,
-    const std::string label, Err *err) const
+    const std::string &label, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || component == nullptr || item == nullptr || (ignoreTest_ && item->testonly())) {
         return true;
@@ -554,8 +554,8 @@ bool OhosComponentChecker::CheckInnerApiNotDeclare(const Item *item, const OhosC
     return true;
 }
 
-bool OhosComponentChecker::CheckIncludesAbsoluteDepsOther(const Target *target, const std::string label,
-    const std::string includes, Err *err) const
+bool OhosComponentChecker::CheckIncludesAbsoluteDepsOther(const Target *target, const std::string &label,
+    const std::string &includes, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || target == nullptr || (ignoreTest_ && target->testonly())) {
         return true;
@@ -583,7 +583,7 @@ bool OhosComponentChecker::CheckIncludesAbsoluteDepsOther(const Target *target, 
 }
 
 bool OhosComponentChecker::CheckInnerApiVisibilityDenied(const Item *item, const OhosComponent *component,
-    const std::string label, const std::string deps, Err *err) const
+    const std::string &label, const std::string &deps, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || component == nullptr || item == nullptr || (ignoreTest_ && item->testonly())) {
         return true;
@@ -615,7 +615,7 @@ bool OhosComponentChecker::CheckInnerApiVisibilityDenied(const Item *item, const
 }
 
 bool OhosComponentChecker::CheckTargetAbsoluteDepsOther(const Item *item, const OhosComponent *component,
-    const std::string label, const std::string deps, bool is_external_deps, Err *err) const
+    const std::string &label, const std::string &deps, bool is_external_deps, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || component == nullptr || item == nullptr || (ignoreTest_ && item->testonly())) {
         return true;
@@ -638,8 +638,8 @@ bool OhosComponentChecker::CheckTargetAbsoluteDepsOther(const Item *item, const 
     return true;
 }
 
-bool OhosComponentChecker::CheckImportOther(const FunctionCallNode* function, const BuildSettings* build_settings,
-    const std::string label, const std::string deps, Err *err) const
+bool OhosComponentChecker::CheckImportOther(const FunctionCallNode *function, const BuildSettings *build_settings,
+    const std::string &label, const std::string &deps, Err *err) const
 {
     if (checkType_ <= CheckType::NONE || function == nullptr || build_settings == nullptr) {
         return true;
