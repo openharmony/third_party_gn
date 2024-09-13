@@ -28,6 +28,7 @@ class InnerApiPublicInfoGenerator {
 public:
     void GeneratedInnerapiPublicInfo(const Target *target, const Label &label,
         Scope *scope, const std::string &type, Err *err);
+    void GeneratedExternalPublicConfigs(const std::string &label, const Config *config);
 
     static InnerApiPublicInfoGenerator *getInstance()
     {

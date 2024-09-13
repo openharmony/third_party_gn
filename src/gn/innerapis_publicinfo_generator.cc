@@ -124,19 +124,6 @@ static bool CheckIncludes(const OhosComponentChecker *checker, const std::string
     return true;
 }
 
-static bool CheckInExternalPublicConfigsMap(const std::string &label, bool is_public)
-{
-    if (!is_public) {
-        return false;
-    }
-
-    if (external_public_configs_.find(label) != external_public_configs_.end() &&
-        external_public_configs_[label].empty()) {
-        return true;
-    }
-    return false;
-}
-
 static void SetExternalPublicConfigsKey(const std::string &label, bool is_public)
 {
     if (!is_public) {
@@ -155,6 +142,18 @@ static void SetExternalPublicConfigsValue(const std::string &label, const std::s
     return;
 }
 
+static std::string ReplaceDoubleQuotes(const std::string& input) {
+    std::string result;
+    for (char c : input) {
+        if (c == '"') {
+            result += "\\\"";
+        } else {
+            result += c;
+        }
+    }
+    return result;
+}
+
 static std::string GetFlagsInfo(const Config *config, const std::string &label, bool needSetToConfigs)
 {
     std::string info;
@@ -171,9 +170,10 @@ static std::string GetFlagsInfo(const Config *config, const std::string &label, 
                 info += ",\n      ";                                     \
             }                                                            \
             first_##flags = false;                                       \
-            info += "\"" + flag + "\"";                                  \
+            std::string str = ReplaceDoubleQuotes(flag);                 \
+            info += "\"" + str + "\"";                                   \
             if (needSetToConfigs) {                                      \
-                SetExternalPublicConfigsValue(label, #flags, flag);      \
+                SetExternalPublicConfigsValue(label, #flags, str);       \
             }                                                            \
         }                                                                \
         info += "\n    ]";                                               \
@@ -199,55 +199,8 @@ static std::string GetFlagsInfo(const Config *config, const std::string &label, 
     return info;
 }
 
-static void WritePublicConfigs(const std::string &label, const std::string &info)
-{
-    int pos = label.find(":");
-    std::string dir = build_out_ + "/" + "external_public_configs" + label.substr(1, pos - 1);
-    std::string name = label.substr(pos + 1);
-
-    base::FilePath path(dir);
-    base::CreateDirectory(path);
-    std::ofstream public_file;
-    const std::string json_path = dir + "/" + name + ".json";
-    if (IsFileExists(json_path)) {
-        return;
-    }
-    public_file.open(json_path, std::ios::out);
-    public_file << info;
-    public_file.close();
-    return;
-}
-
-static void GeneratedExternalPublicConfigs(const std::string &label)
-{
-    std::string info = "{";
-    info += "\n    \"label\": \"" + label + "\",\n";
-
-    bool first_outer = true;
-    for (const auto& pair : external_public_configs_[label]) {
-        if (!first_outer) {
-            info += ",\n";
-        }
-        first_outer = false;
-
-        info += "    \"" + pair.first + "\": [\n";
-        bool first_inner = true;
-        for (const auto& value : pair.second) {
-            if (!first_inner) {
-                info += ",\n";
-            }
-            first_inner = false;
-            info += "        \"" + value + "\"";
-        }
-        info += "\n    ]";
-    }
-    info += "\n}";
-    WritePublicConfigs(label, info);
-    return;
-}
-
 static std::string GetIncludeDirsInfo(const Config *config, const OhosComponentChecker *checker,
-    const std::string &label, const PublicConfigInfoParams &params, bool is_in_map)
+    const std::string &label, const PublicConfigInfoParams &params)
 {
     std::string info = ",\n    \"include_dirs\": [\n      ";
     const std::vector<SourceDir> dirs = config->own_values().include_dirs();
@@ -258,9 +211,6 @@ static std::string GetIncludeDirsInfo(const Config *config, const OhosComponentC
         }
         first = false;
         info += "\"" + dir.value() + "\"";
-        if (is_in_map) {
-            SetExternalPublicConfigsValue(label, "include_dirs", dir.value());
-        }
         if (!CheckIncludes(checker, dir.value(), params)) {
             return "";
         }
@@ -295,12 +245,8 @@ static std::string GetPublicConfigInfo(const PublicConfigInfoParams &params, Sco
                 continue;
             }
             found = true;
-            bool is_in_map = CheckInExternalPublicConfigsMap(label, params.is_public);
-            info += GetIncludeDirsInfo(as_config, checker, label, params, is_in_map);
-            info += GetFlagsInfo(as_config, label, is_in_map);
-            if (is_in_map) {
-                GeneratedExternalPublicConfigs(label);
-            }
+            info += GetIncludeDirsInfo(as_config, checker, label, params);
+            info += GetFlagsInfo(as_config, label, false);
         }
         info += "  }";
         if (!found) {
@@ -429,6 +375,81 @@ static std::string GetComponentInfo(const std::string &subsystem, const std::str
     info += ",\n  \"path\":\"" + path + "\"";
     info += "\n}\n";
     return info;
+}
+
+static void WritePublicConfigs(const std::string &label, const std::string &info)
+{
+    int pos = label.find(":");
+    std::string dir = build_out_ + "/" + "external_public_configs" + label.substr(1, pos - 1);
+    std::string name = label.substr(pos + 1);
+
+    base::FilePath path(dir);
+    base::CreateDirectory(path);
+    std::ofstream public_file;
+    const std::string json_path = dir + "/" + name + ".json";
+    if (IsFileExists(json_path)) {
+        return;
+    }
+    public_file.open(json_path, std::ios::out);
+    public_file << info;
+    public_file.close();
+    return;
+}
+
+static bool CheckInExternalPublicConfigsMap(const std::string &label)
+{
+    if (external_public_configs_.find(label) != external_public_configs_.end() &&
+        external_public_configs_[label].empty()) {
+        return true;
+    }
+    return false;
+}
+
+static void FillPublicConfigs(const Config *config, const std::string &label)
+{
+    const std::vector<SourceDir> dirs = config->own_values().include_dirs();
+    for (const SourceDir &dir : dirs) {
+        SetExternalPublicConfigsValue(label, "include_dirs", dir.value());
+    }
+    GetFlagsInfo(config, label, true);
+    return;
+}
+
+static std::string GetExternalPublicConfigsInfo(const std::string &label)
+{
+    std::string info = "{";
+    info += "\n    \"label\": \"" + label + "\",\n";
+
+    bool first_outer = true;
+    for (const auto& pair : external_public_configs_[label]) {
+        if (!first_outer) {
+            info += ",\n";
+        }
+        first_outer = false;
+
+        info += "    \"" + pair.first + "\": [\n";
+        bool first_inner = true;
+        for (const auto& value : pair.second) {
+            if (!first_inner) {
+                info += ",\n";
+            }
+            first_inner = false;
+            info += "        \"" + value + "\"";
+        }
+        info += "\n    ]";
+    }
+    info += "\n}";
+    return info;
+}
+
+void InnerApiPublicInfoGenerator::GeneratedExternalPublicConfigs(const std::string &label, const Config *config)
+{
+    if (!CheckInExternalPublicConfigsMap(label)) {
+        return;
+    }
+    FillPublicConfigs(config, label);
+    WritePublicConfigs(label, GetExternalPublicConfigsInfo(label));
+    return;
 }
 
 void InnerApiPublicInfoGenerator::GeneratedInnerapiPublicInfo(const Target *target, const Label &label, Scope *scope,
