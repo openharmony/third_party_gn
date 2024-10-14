@@ -154,47 +154,48 @@ static std::string ReplaceDoubleQuotes(const std::string& input) {
     return result;
 }
 
+static std::string GetSingleFlagInfo(const std::string &name, const std::vector<std::string> flags,
+    const std::string &label, bool needSetToConfigs)
+{
+    std::string info;
+    if (!flags.empty()) {
+        info +=",\n    \"";
+        info += name;
+        info += "\": [\n      ";
+        bool first = true;
+        for (const std::string &flag : flags) {
+            if (!first) {
+                info += ",\n      ";
+            }
+            first = false;
+            std::string str = ReplaceDoubleQuotes(flag);
+            info += "\"" + str + "\"";
+            if (needSetToConfigs) {
+                SetExternalPublicConfigsValue(label, name, str);
+            }
+        }
+        info += "\n    ]";
+    }
+    return info;
+}
+
 static std::string GetFlagsInfo(const Config *config, const std::string &label, bool needSetToConfigs)
 {
     std::string info;
-
-#define GET_FLAGS_INFO(flags)                                            \
-    const std::vector<std::string> flags = config->own_values().flags(); \
-    if (!flags.empty()) {                                                \
-        info +=",\n    \"";                                              \
-        info += #flags;                                                  \
-        info += "\": [\n      ";                                         \
-        bool first_##flags = true;                                       \
-        for (const std::string &flag : flags) {                          \
-            if (!first_##flags) {                                        \
-                info += ",\n      ";                                     \
-            }                                                            \
-            first_##flags = false;                                       \
-            std::string str = ReplaceDoubleQuotes(flag);                 \
-            info += "\"" + str + "\"";                                   \
-            if (needSetToConfigs) {                                      \
-                SetExternalPublicConfigsValue(label, #flags, str);       \
-            }                                                            \
-        }                                                                \
-        info += "\n    ]";                                               \
-    }
-
-    GET_FLAGS_INFO(arflags)
-    GET_FLAGS_INFO(asmflags)
-    GET_FLAGS_INFO(cflags)
-    GET_FLAGS_INFO(cflags_c)
-    GET_FLAGS_INFO(cflags_cc)
-    GET_FLAGS_INFO(cflags_objc)
-    GET_FLAGS_INFO(cflags_objcc)
-    GET_FLAGS_INFO(defines)
-    GET_FLAGS_INFO(frameworks)
-    GET_FLAGS_INFO(weak_frameworks)
-    GET_FLAGS_INFO(ldflags)
-    GET_FLAGS_INFO(rustflags)
-    GET_FLAGS_INFO(rustenv)
-    GET_FLAGS_INFO(swiftflags)
-#undef GET_FLAGS_INFO
-
+    info += GetSingleFlagInfo("arflags", config->own_values().arflags(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("asmflags", config->own_values().asmflags(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("cflags", config->own_values().cflags(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("cflags_c", config->own_values().cflags_c(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("cflags_cc", config->own_values().cflags_cc(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("cflags_objc", config->own_values().cflags_objc(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("cflags_objcc", config->own_values().cflags_objcc(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("defines", config->own_values().defines(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("frameworks", config->own_values().frameworks(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("weak_frameworks", config->own_values().weak_frameworks(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("ldflags", config->own_values().ldflags(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("rustflags", config->own_values().rustflags(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("rustenv", config->own_values().rustenv(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("swiftflags", config->own_values().swiftflags(), label, needSetToConfigs);
     info += "\n";
     return info;
 }
