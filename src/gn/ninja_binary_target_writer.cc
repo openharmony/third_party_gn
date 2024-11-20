@@ -18,9 +18,7 @@
 #include "gn/pool.h"
 #include "gn/settings.h"
 #include "gn/string_utils.h"
-#include "gn/substitution_writer.h"
 #include "gn/target.h"
-#include "gn/variables.h"
 
 namespace {
 

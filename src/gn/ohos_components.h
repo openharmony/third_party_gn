@@ -69,7 +69,7 @@ public:
 
     bool isOhosComponentsLoaded() const;
 
-    static bool isOhosIndepCompilerEnable();
+    bool isOhosIndepCompilerEnable();
     bool GetExternalDepsLabel(const Value &external_dep, std::string &label,
         const Label& current_toolchain, int &whole_status, Err *err) const;
     bool GetPrivateDepsLabel(const Value &dep, std::string &label,
@@ -82,6 +82,8 @@ public:
         unsigned int ruleSwitch);
 
     void LoadOhosComponentsMapping(const std::string& build_dir, const Value *support, const Value *independent);
+
+    const OhosComponent *GetComponentByName(const std::string &basicString);
 
 private:
     OhosComponentsImpl *mgr = nullptr;

@@ -22,6 +22,15 @@ extern const char kExternalDeps_Help[];
 extern const char kPublicExternalDeps[];
 extern const char kPublicExternalDeps_HelpShort[];
 extern const char kPublicExternalDeps_Help[];
+
+extern const char kCopyRustCrateType[];
+extern const char kCopyRustCrateType_HelpShort[];
+extern const char kCopyRustCrateType_Help[];
+
+extern const char kCopyRustCrateName[];
+extern const char kCopyRustCrateName_HelpShort[];
+extern const char kCopyRustCrateName_Help[];
+
 }  // namespace variables
 
 #endif  // TOOLS_GN_SWIFT_TARGET_VARIABLES_H_

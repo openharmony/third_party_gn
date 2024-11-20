@@ -121,3 +121,15 @@ const OhosComponent *BuildSettings::GetOhosComponent(const std::string& label) c
   }
   return ohos_components_->GetComponentByLabel(label);
 }
+
+const OhosComponent *BuildSettings::GetOhosComponentByName(const std::string& component_name) const
+{
+    if (ohos_components_ == nullptr) {
+        return nullptr;
+    }
+    return ohos_components_->GetComponentByName(component_name);
+}
+
+bool BuildSettings::isOhosIndepCompilerEnable() const {
+    return ohos_components_ && ohos_components_->isOhosIndepCompilerEnable();
+}

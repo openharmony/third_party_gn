@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <regex>
 #include "gn/err.h"
 #include "gn/filesystem_utils.h"
 #include "gn/functions.h"
 #include "gn/label.h"
 #include "gn/parse_tree.h"
 #include "gn/value.h"
+#include "ohos_components.h"
 
 namespace functions {
 
@@ -75,6 +77,22 @@ Examples
   # Returns string "//out/Debug/gen/foo/bar".
 )*";
 
+std::string getComponentLabel(const std::string& target_label,
+                              const BuildSettings* settings) {
+  std::regex pattern("[A-Za-z0-9_]+:[A-Za-z0-9_.-]+");
+  if (std::regex_match(target_label, pattern)) {
+    size_t pos = target_label.find(':');
+    std::string component_str = target_label.substr(0, pos);
+    std::string innner_api_str = target_label.substr(pos + 1);
+    const OhosComponent* component =
+        settings->GetOhosComponentByName(component_str);
+    if (component) {
+      return component->getInnerApi(innner_api_str);
+    }
+  }
+  return {};
+}
+
 Value RunGetLabelInfo(Scope* scope,
                       const FunctionCallNode* function,
                       const std::vector<Value>& args,
@@ -85,10 +103,26 @@ Value RunGetLabelInfo(Scope* scope,
   }
 
   // Resolve the requested label.
-  Label label =
-      Label::Resolve(scope->GetSourceDir(),
-                     scope->settings()->build_settings()->root_path_utf8(),
-                     ToolchainLabelForScope(scope), args[0], err);
+  const BuildSettings* buildSettings = scope->settings()->build_settings();
+  Label label;
+  std::string target = args[0].string_value();
+  bool resolved = false;
+  // [OHOS] Resolve component info first
+  if (!target.empty() && buildSettings->isOhosIndepCompilerEnable()) {
+    const std::string& label_str = getComponentLabel(target, buildSettings);
+    if (!label_str.empty()) {
+      const Value& value = Value(args[0].origin(), label_str);
+      label =
+          Label::Resolve(scope->GetSourceDir(), buildSettings->root_path_utf8(),
+                         ToolchainLabelForScope(scope), value, err);
+      resolved = true;
+    }
+  }
+  if (!resolved) {
+    label =
+        Label::Resolve(scope->GetSourceDir(), buildSettings->root_path_utf8(),
+                       ToolchainLabelForScope(scope), args[0], err);
+  }
   if (label.is_null())
     return Value();
 

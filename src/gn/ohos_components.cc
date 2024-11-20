@@ -456,6 +456,9 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
     }
     if (isOhosIndepCompilerEnable()) {
         label = component->getInnerApi(innerapi_name + tool_chain);
+        if (label == EMPTY_INNERAPI) {
+          label = component->getInnerApi(innerapi_name);
+        }
     } else {
         label = component->getInnerApi(innerapi_name) + tool_chain;
     }
@@ -603,4 +606,15 @@ void OhosComponents::LoadOhosComponentsMapping(const std::string& build_dir,
 
     OhosComponentMapping::Init(build_dir);
     return;
+}
+
+const OhosComponent *OhosComponents::GetComponentByName(const std::string &component_name) {
+    if (!mgr) {
+        return nullptr;
+    }
+    return mgr->GetComponentByName(component_name);
+}
+
+bool OhosComponents::isOhosIndepCompilerEnable() {
+    return mgr && mgr->isOhosIndepCompilerEnable();
 }

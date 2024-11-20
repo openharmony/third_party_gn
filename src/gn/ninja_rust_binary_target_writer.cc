@@ -154,10 +154,16 @@ void NinjaRustBinaryTargetWriter::Run() {
     }
     order_only_deps.push_back(non_linkable_dep->dependency_output_file());
   }
+  std::vector<ExternCrate> transitive_crates;
+
   for (const auto* linkable_dep : classified_deps.linkable_deps) {
+    if (linkable_dep->copy_rust_file()) {
+      transitive_crates.push_back({linkable_dep, true});
+      continue;
+    }
     // Rust cdylibs are treated as non-Rust dependencies for linking purposes.
-    if (linkable_dep->source_types_used().RustSourceUsed() &&
-        linkable_dep->rust_values().crate_type() != RustValues::CRATE_CDYLIB) {
+    if ((linkable_dep->source_types_used().RustSourceUsed() &&
+        linkable_dep->rust_values().crate_type() != RustValues::CRATE_CDYLIB) || linkable_dep->copy_rust_file()) {
       rustdeps.push_back(linkable_dep->link_output_file());
     } else {
       nonrustdeps.push_back(linkable_dep->link_output_file());
@@ -179,14 +185,13 @@ void NinjaRustBinaryTargetWriter::Run() {
   // Collect the full transitive set of rust libraries that this target depends
   // on, and the public flag represents if the target has direct access to the
   // dependency through a chain of public_deps.
-  std::vector<ExternCrate> transitive_crates;
   for (const auto& inherited : resolved().GetRustInheritedLibraries(target_)) {
     const Target* dep = inherited.target();
     bool has_direct_access = inherited.is_public();
     // We will tell rustc to look for crate metadata for any rust crate
     // dependencies except cdylibs, as they have no metadata present.
-    if (dep->source_types_used().RustSourceUsed() &&
-        RustValues::IsRustLibrary(dep)) {
+    if ((dep->source_types_used().RustSourceUsed() &&
+        RustValues::IsRustLibrary(dep)) || dep->copy_rust_file()) {
       transitive_crates.push_back({dep, has_direct_access});
       // If the current crate can directly acccess the `dep` crate, then the
       // current crate needs an implicit dependency on `dep` so it will be
@@ -194,6 +199,8 @@ void NinjaRustBinaryTargetWriter::Run() {
       if (has_direct_access) {
         implicit_deps.push_back(dep->dependency_output_file());
       }
+    } else if(dep->copy_linkable_file()){
+      nonrustdeps.push_back(dep->link_output_file());
     }
   }
 
@@ -289,7 +296,9 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
     out_ << " --extern ";
     out_ << crate_name;
     out_ << "=";
-    path_output_.WriteFile(out_, dep.dependency_output_file());
+    path_output_.WriteFile(out_, dep.copy_rust_file()
+                                     ? dep.link_output_file()
+                                     : dep.dependency_output_file());
   };
 
   // Write accessible crates with `--extern` to add them to the extern prelude.
@@ -320,15 +329,18 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
   // will only search the paths specified to -Ldependency, thus D needs to
   // appear as both a --extern (for A) and -Ldependency (for B and C).
   for (const auto& crate : transitive_rust_deps) {
-    const OutputFile& rust_lib = crate.target->dependency_output_file();
+    const OutputFile& rust_lib = crate.target->copy_rust_file()
+                                     ? crate.target->link_output_file()
+                                     : crate.target->dependency_output_file();
     if (emitted_rust_libs.count(rust_lib) == 0) {
       if (crate.has_direct_access) {
         write_extern_target(*crate.target);
       }
       emitted_rust_libs.insert(rust_lib);
     }
-    private_extern_dirs.push_back(
-        rust_lib.AsSourceFile(settings_->build_settings()).GetDir());
+    const SourceDir& dir =
+        rust_lib.AsSourceFile(settings_->build_settings()).GetDir();
+    private_extern_dirs.push_back(dir);
   }
 
   // Add explicitly specified externs from the GN target.

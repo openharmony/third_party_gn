@@ -177,6 +177,10 @@ class Target : public Item {
       DCHECK_EQ(COPY_FILES, output_type_);
       copy_linkable_file_ = linkable;
   }
+  bool copy_rust_file() const {
+    return copy_linkable_file_ && output_type_ == COPY_FILES &&
+           has_rust_values();
+  }
 
   // Metadata. Target takes ownership of the resulting scope.
   const Metadata& metadata() const;
