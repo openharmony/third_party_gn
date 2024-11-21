@@ -561,8 +561,8 @@ bool OhosComponentChecker::CheckIncludesAbsoluteDepsOther(const Target *target, 
         return true;
     }
 
-    if (!StartWith(includes, "//") || StartWith(includes, "//out/") || StartWith(includes, "////out/")
-        || StartWith(includes, "//prebuilts/")) {
+    if (includes == "//" || !StartWith(includes, "//") || StartWith(includes, "//out/")
+        || StartWith(includes, "////out/") || StartWith(includes, "//prebuilts/")) {
         return true;
     }
 
