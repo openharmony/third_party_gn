@@ -15,7 +15,6 @@
 #include "gn/config.h"
 #include "gn/config_values_generator.h"
 #include "gn/err.h"
-#include "gn/innerapis_publicinfo_generator.h"
 #include "gn/input_file.h"
 #include "gn/ohos_components_checker.h"
 #include "gn/ohos_components_mapping.h"
@@ -394,11 +393,6 @@ Value RunConfig(const FunctionCallNode* function,
   }
   if (err->has_error())
     return Value();
-
-  InnerApiPublicInfoGenerator* instance = InnerApiPublicInfoGenerator::getInstance();
-  if (instance != nullptr) {
-    instance->GeneratedExternalPublicConfigs(label.GetUserVisibleName(false), config.get());
-  }
 
   // Save the generated item.
   Scope::ItemVector* collector = scope->GetItemCollector();

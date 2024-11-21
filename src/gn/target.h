@@ -141,6 +141,9 @@ class Target : public Item {
   const FileList& sources() const { return sources_; }
   FileList& sources() { return sources_; }
 
+  const std::vector<SourceDir>& include_dirs() const { return include_dirs_; }
+  std::vector<SourceDir>& include_dirs() { return include_dirs_; }
+
   const SourceFileTypeSet& source_types_used() const {
     return source_types_used_;
   }
@@ -288,6 +291,10 @@ class Target : public Item {
   const UniqueVector<LabelConfigPair>& configs() const { return configs_; }
   UniqueVector<LabelConfigPair>& configs() { return configs_; }
 
+  // List of direct configs that this target, excluding the indirect config passed by.
+  const UniqueVector<LabelConfigPair>& own_configs() const { return own_configs_; }
+  UniqueVector<LabelConfigPair>& own_configs() { return own_configs_; }
+
   // List of configs that all dependencies (direct and indirect) of this
   // target get. These configs are not added to this target. Note that due
   // to the way this is computed, there may be duplicates in this list.
@@ -298,12 +305,26 @@ class Target : public Item {
     return all_dependent_configs_;
   }
 
+  // List of direct all_dependent_configs that this target, excluding the indirect config passed by.
+  const UniqueVector<LabelConfigPair>& own_all_dependent_configs() const {
+    return own_all_dependent_configs_;
+  }
+  UniqueVector<LabelConfigPair>& own_all_dependent_configs() {
+    return own_all_dependent_configs_;
+  }
+
   // List of configs that targets depending directly on this one get. These
   // configs are also added to this target.
   const UniqueVector<LabelConfigPair>& public_configs() const {
     return public_configs_;
   }
   UniqueVector<LabelConfigPair>& public_configs() { return public_configs_; }
+
+  // List of direct public_configs that this target, excluding the indirect config passed by.
+  const UniqueVector<LabelConfigPair>& own_public_configs() const {
+    return own_public_configs_;
+  }
+  UniqueVector<LabelConfigPair>& own_public_configs() { return own_public_configs_; }
 
   // Dependencies that can include files from this target.
   const std::set<Label>& allow_circular_includes_from() const {
@@ -497,6 +518,7 @@ class Target : public Item {
   bool output_extension_set_ = false;
 
   FileList sources_;
+  std::vector<SourceDir> include_dirs_;
   SourceFileTypeSet source_types_used_;
   bool all_headers_public_ = true;
   FileList public_headers_;
@@ -515,6 +537,10 @@ class Target : public Item {
   LabelTargetVector gen_deps_;
 
   // See getters for more info.
+  UniqueVector<LabelConfigPair> own_configs_;
+  UniqueVector<LabelConfigPair> own_all_dependent_configs_;
+  UniqueVector<LabelConfigPair> own_public_configs_;
+
   UniqueVector<LabelConfigPair> configs_;
   UniqueVector<LabelConfigPair> all_dependent_configs_;
   UniqueVector<LabelConfigPair> public_configs_;

@@ -46,6 +46,10 @@ TargetGenerator::~TargetGenerator() = default;
 
 void TargetGenerator::Run() {
   // All target types use these.
+
+  if (!FillIncludes())
+    return;
+
   if (!FillDependentConfigs())
     return;
 
@@ -169,10 +173,6 @@ void TargetGenerator::GenerateTarget(Scope* scope,
     *err = Err(function_call, "Can't define a target in this context.");
     return;
   }
-  InnerApiPublicInfoGenerator* instance = InnerApiPublicInfoGenerator::getInstance();
-  if (instance != nullptr) {
-    instance->GeneratedInnerapiPublicInfo(target.get(), label, scope, output_type, err);
-  }
   collector->push_back(std::move(target));
 }
 
@@ -193,6 +193,19 @@ bool TargetGenerator::FillSources() {
   return true;
 }
 
+bool TargetGenerator::FillIncludes() {
+  const Value* value = scope_->GetValue(variables::kIncludeDirs, true);
+  if (!value)
+    return true;
+
+  std::vector<SourceDir> dest_includes;
+  if (!ExtractListOfRelativeDirs(scope_->settings()->build_settings(), *value,
+                                  scope_->GetSourceDir(), &dest_includes, err_))
+    return false;
+  target_->include_dirs() = std::move(dest_includes);
+  return true;
+}
+
 bool TargetGenerator::FillPublic() {
   const Value* value = scope_->GetValue(variables::kPublic, true);
   if (!value)
@@ -209,8 +222,25 @@ bool TargetGenerator::FillPublic() {
   return true;
 }
 
+bool TargetGenerator::FillOwnConfigs() {
+  Scope::ItemVector *collector = scope_->GetItemCollector();
+    for (const auto &config : target_->configs()) {
+        std::string label = config.label.GetUserVisibleName(false);
+        for (auto &item : *collector) {
+            if (item->label().GetUserVisibleName(false) != label) {
+                continue;
+            }
+            target_->own_configs().push_back(config);
+        }
+    }
+    return true;
+}
+
 bool TargetGenerator::FillConfigs() {
-  return FillGenericConfigs(variables::kConfigs, &target_->configs());
+  if (!FillGenericConfigs(variables::kConfigs, &target_->configs())) {
+    return false;
+  }
+  return FillOwnConfigs();
 }
 
 bool TargetGenerator::FillDependentConfigs() {
@@ -220,6 +250,14 @@ bool TargetGenerator::FillDependentConfigs() {
 
   if (!FillGenericConfigs(variables::kPublicConfigs,
                           &target_->public_configs()))
+    return false;
+
+  if (!FillGenericConfigs(variables::kAllDependentConfigs,
+                          &target_->own_all_dependent_configs()))
+    return false;
+
+  if (!FillGenericConfigs(variables::kPublicConfigs,
+                          &target_->own_public_configs()))
     return false;
 
   return true;

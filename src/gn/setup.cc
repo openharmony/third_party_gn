@@ -22,6 +22,7 @@
 #include "gn/commands.h"
 #include "gn/exec_process.h"
 #include "gn/filesystem_utils.h"
+#include "gn/innerapis_publicinfo_generator.h"
 #include "gn/input_file.h"
 #include "gn/label_pattern.h"
 #include "gn/ohos_components_checker.h"
@@ -593,6 +594,14 @@ bool Setup::RunPostMessageLoop(const base::CommandLine& cmdline) {
   if (cmdline.HasSwitch(switches::kTracelog))
     SaveTraces(cmdline.GetSwitchValuePath(switches::kTracelog));
 
+  Err result;
+  InnerApiPublicInfoGenerator* instance = InnerApiPublicInfoGenerator::getInstance();
+  if (instance != nullptr) {
+    if (!instance->GeneratedInnerapiPublicInfo(builder_.GetAllResolvedTargets(), &result)) {
+      result.PrintToStdout();
+      return false;
+    }
+  }
   return true;
 }
 

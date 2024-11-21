@@ -26,38 +26,18 @@
 
 InnerApiPublicInfoGenerator *InnerApiPublicInfoGenerator::instance_ = nullptr;
 
-static std::map<std::string, std::map<std::string, std::vector<std::string>>> external_public_configs_;
-
-static std::string build_out_;
-
 static bool StartWith(const std::string &str, const std::string &prefix)
 {
     return (str.rfind(prefix, 0) == 0);
 }
 
-static bool IsFileExists(const std::string &path)
+static std::string GetOutName(const Target *target, const std::string &module, const std::string &type)
 {
-    if (access(path.c_str(), F_OK) == 0) {
-        return true;
-    }
-    return false;
-}
+    std::string output = target->output_name();
+    std::string extension = target->output_extension();
 
-static std::string GetOutName(const Scope *scope, const std::string &target_name, const std::string &type)
-{
-    std::string output_name = "";
-    std::string extension = "";
-    const Value *name_value = scope->GetValue("output_name");
-    const Value *extension_value = scope->GetValue("output_extension");
-    if (name_value != nullptr) {
-        output_name = name_value->string_value();
-    }
-    if (extension_value != nullptr) {
-        extension = extension_value->string_value();
-    }
-
-    if (output_name == "") {
-        output_name = target_name;
+    if (output == "") {
+        output = module;
     }
     if (type == "shared_library") {
         if (extension == "") {
@@ -65,13 +45,13 @@ static std::string GetOutName(const Scope *scope, const std::string &target_name
         } else {
             extension = "." + extension;
         }
-        if (!StartWith(output_name, "lib")) {
-            output_name = "lib" + output_name;
+        if (!StartWith(output, "lib")) {
+            output = "lib" + output;
         }
     } else if (type == "static_library") {
         extension = ".a";
-        if (!StartWith(output_name, "lib")) {
-            output_name = "lib" + output_name;
+        if (!StartWith(output, "lib")) {
+            output = "lib" + output;
         }
     } else if (type == "rust_library") {
         if (extension == "") {
@@ -79,37 +59,34 @@ static std::string GetOutName(const Scope *scope, const std::string &target_name
         } else {
             extension = "." + extension;
         }
-        if (!StartWith(output_name, "lib")) {
-            output_name = "lib" + output_name;
+        if (!StartWith(output, "lib")) {
+            output = "lib" + output;
         }
     }
-    return output_name + extension;
+    return output + extension;
 }
 
-static bool TraverIncludeDirs(const OhosComponentChecker *checker, const Target *target, const Scope *scope,
+static bool TraverIncludeDirs(const Target *target, const OhosComponentChecker *checker,
     const std::string &label, Err *err)
 {
-    const Value *includes = scope->GetValue("include_dirs");
-    if (includes != nullptr) {
-        const std::vector<Value> &includes_list = includes->list_value();
-        for (size_t i = 0; i < includes_list.size(); i++) {
-            SourceDir real_dir = scope->GetSourceDir().ResolveRelativeDir(includes_list[i], err,
-                scope->settings()->build_settings()->root_path_utf8());
-            if (!checker->CheckIncludesAbsoluteDepsOther(target, label, real_dir.value(), err)) {
-                return false;
-            }
+    if (checker == nullptr) {
+        return true;
+    }
+
+    std::vector<SourceDir> dirs = target->include_dirs();
+    for (const SourceDir &dir : dirs) {
+        if (!checker->CheckIncludesAbsoluteDepsOther(target, label, dir.value(), err)) {
+            return false;
         }
     }
     return true;
 }
 
-static bool CheckIncludes(const OhosComponentChecker *checker, const std::string &dir,
-    const PublicConfigInfoParams &params)
+static bool CheckIncludes(const Target *target, const OhosComponentChecker *checker,
+    const std::string &dir, Err *err, bool isPublic)
 {
-    const Target *target = params.target;
-    const std::string label = params.label;
-    Err *err = params.err;
-    if (params.is_public) {
+    std::string label = target->label().GetUserVisibleName(false);
+    if (isPublic) {
         if (checker != nullptr) {
             if (!checker->CheckInnerApiIncludesOverRange(target, label, dir, err)) {
                 return false;
@@ -124,25 +101,7 @@ static bool CheckIncludes(const OhosComponentChecker *checker, const std::string
     return true;
 }
 
-static void SetExternalPublicConfigsKey(const std::string &label, bool is_public)
-{
-    if (!is_public) {
-        return;
-    }
-    if (external_public_configs_.find(label) != external_public_configs_.end()) {
-        return;
-    }
-    external_public_configs_[label];
-    return;
-}
-
-static void SetExternalPublicConfigsValue(const std::string &label, const std::string &name, const std::string &value)
-{
-    external_public_configs_[label][name].push_back(value);
-    return;
-}
-
-static std::string ReplaceDoubleQuotes(const std::string& input) {
+static std::string ReplaceDoubleQuotes(const std::string &input) {
     std::string result;
     for (char c : input) {
         if (c == '"') {
@@ -154,8 +113,7 @@ static std::string ReplaceDoubleQuotes(const std::string& input) {
     return result;
 }
 
-static std::string GetSingleFlagInfo(const std::string &name, const std::vector<std::string> flags,
-    const std::string &label, bool needSetToConfigs)
+static std::string GetSingleFlagInfo(const std::string &name, const std::vector<std::string> &flags)
 {
     std::string info;
     if (!flags.empty()) {
@@ -170,38 +128,35 @@ static std::string GetSingleFlagInfo(const std::string &name, const std::vector<
             first = false;
             std::string str = ReplaceDoubleQuotes(flag);
             info += "\"" + str + "\"";
-            if (needSetToConfigs) {
-                SetExternalPublicConfigsValue(label, name, str);
-            }
         }
         info += "\n    ]";
     }
     return info;
 }
 
-static std::string GetFlagsInfo(const Config *config, const std::string &label, bool needSetToConfigs)
+static std::string GetFlagsInfo(const Config *config)
 {
     std::string info;
-    info += GetSingleFlagInfo("arflags", config->own_values().arflags(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("asmflags", config->own_values().asmflags(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("cflags", config->own_values().cflags(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("cflags_c", config->own_values().cflags_c(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("cflags_cc", config->own_values().cflags_cc(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("cflags_objc", config->own_values().cflags_objc(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("cflags_objcc", config->own_values().cflags_objcc(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("defines", config->own_values().defines(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("frameworks", config->own_values().frameworks(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("weak_frameworks", config->own_values().weak_frameworks(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("ldflags", config->own_values().ldflags(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("rustflags", config->own_values().rustflags(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("rustenv", config->own_values().rustenv(), label, needSetToConfigs);
-    info += GetSingleFlagInfo("swiftflags", config->own_values().swiftflags(), label, needSetToConfigs);
+    info += GetSingleFlagInfo("arflags", config->own_values().arflags());
+    info += GetSingleFlagInfo("asmflags", config->own_values().asmflags());
+    info += GetSingleFlagInfo("cflags", config->own_values().cflags());
+    info += GetSingleFlagInfo("cflags_c", config->own_values().cflags_c());
+    info += GetSingleFlagInfo("cflags_cc", config->own_values().cflags_cc());
+    info += GetSingleFlagInfo("cflags_objc", config->own_values().cflags_objc());
+    info += GetSingleFlagInfo("cflags_objcc", config->own_values().cflags_objcc());
+    info += GetSingleFlagInfo("defines", config->own_values().defines());
+    info += GetSingleFlagInfo("frameworks", config->own_values().frameworks());
+    info += GetSingleFlagInfo("weak_frameworks", config->own_values().weak_frameworks());
+    info += GetSingleFlagInfo("ldflags", config->own_values().ldflags());
+    info += GetSingleFlagInfo("rustflags", config->own_values().rustflags());
+    info += GetSingleFlagInfo("rustenv", config->own_values().rustenv());
+    info += GetSingleFlagInfo("swiftflags", config->own_values().swiftflags());
     info += "\n";
     return info;
 }
 
-static std::string GetIncludeDirsInfo(const Config *config, const OhosComponentChecker *checker,
-    const std::string &label, const PublicConfigInfoParams &params)
+static std::string GetIncludeDirsInfo(const Target *target, const Config *config,
+    const OhosComponentChecker *checker, Err *err, bool isPublic)
 {
     std::string info = ",\n    \"include_dirs\": [\n      ";
     const std::vector<SourceDir> dirs = config->own_values().include_dirs();
@@ -212,7 +167,7 @@ static std::string GetIncludeDirsInfo(const Config *config, const OhosComponentC
         }
         first = false;
         info += "\"" + dir.value() + "\"";
-        if (!CheckIncludes(checker, dir.value(), params)) {
+        if (!CheckIncludes(target, checker, dir.value(), err, isPublic)) {
             return "";
         }
     }
@@ -221,52 +176,33 @@ static std::string GetIncludeDirsInfo(const Config *config, const OhosComponentC
     return info;
 }
 
-static std::string GetPublicConfigInfo(const PublicConfigInfoParams &params, Scope *scope,
-    const UniqueVector<LabelConfigPair> &configs, const OhosComponentChecker *checker)
+static std::string GetConfigInfo(const Target *target, const UniqueVector<LabelConfigPair> &configs,
+    const OhosComponentChecker *checker, Err *err, bool isPublic)
 {
-    Scope::ItemVector *collector = scope->GetItemCollector();
     std::string info = "[{";
     bool first = true;
     for (const auto &config : configs) {
+        std::string label = config.label.GetUserVisibleName(false);
         if (!first) {
             info += ", {";
         }
         first = false;
-        bool found = false;
-
-        std::string label = config.label.GetUserVisibleName(false);
         info += "\n    \"label\": \"" + label + "\"";
-        for (auto &item : *collector) {
-            if (item->label().GetUserVisibleName(false) != label) {
-                continue;
-            }
-
-            Config *as_config = item->AsConfig();
-            if (!as_config) {
-                continue;
-            }
-            found = true;
-            info += GetIncludeDirsInfo(as_config, checker, label, params);
-            info += GetFlagsInfo(as_config, label, false);
-        }
+        info += GetIncludeDirsInfo(target, config.ptr, checker, err, isPublic);
+        info += GetFlagsInfo(config.ptr);
         info += "  }";
-        if (!found) {
-            SetExternalPublicConfigsKey(label, params.is_public);
-        }
     }
     info += "]";
     return info;
 }
 
-static std::string GetPublicConfigsInfo(const Target *target, const std::string &label, Scope *scope,
-    const OhosComponentChecker *checker, Err *err)
+static std::string GetPublicConfigsInfo(const Target *target, const OhosComponentChecker *checker, Err *err)
 {
     std::string info = "";
-    const UniqueVector<LabelConfigPair> configs = target->public_configs();
+    const UniqueVector<LabelConfigPair> configs = target->own_public_configs();
     if (configs.size() > 0) {
         info += ",\n  \"public_configs\": ";
-        PublicConfigInfoParams params = { target, label, err, true };
-        std::string tmp = GetPublicConfigInfo(params, scope, configs, checker);
+        std::string tmp = GetConfigInfo(target, configs, checker, err, true);
         if (tmp == "") {
             return "";
         }
@@ -275,21 +211,19 @@ static std::string GetPublicConfigsInfo(const Target *target, const std::string 
     return info;
 }
 
-static std::string GetAllDependentConfigsInfo(const Target *target, const std::string &label, Scope *scope,
-    const OhosComponentChecker *checker, Err *err)
+static std::string GetAllDependentConfigsInfo(const Target *target, const OhosComponentChecker *checker, Err *err)
 {
     std::string info = "";
-    const UniqueVector<LabelConfigPair> all_configs = target->all_dependent_configs();
+    const UniqueVector<LabelConfigPair> all_configs = target->own_all_dependent_configs();
     if (all_configs.size() > 0) {
         info += ",\n  \"all_dependent_configs\": ";
-        PublicConfigInfoParams params = { target, label, err, true };
-        std::string tmp = GetPublicConfigInfo(params, scope, all_configs, checker);
+        std::string tmp = GetConfigInfo(target, all_configs, checker, err, true);
         if (tmp == "") {
             return "";
         }
         info += tmp;
         if (checker != nullptr) {
-            if (!checker->CheckAllDepsConfigs(target, label, err)) {
+            if (!checker->CheckAllDepsConfigs(target, target->label().GetUserVisibleName(false), err)) {
                 return "";
             }
         }
@@ -297,21 +231,13 @@ static std::string GetAllDependentConfigsInfo(const Target *target, const std::s
     return info;
 }
 
-static std::string GetPrivateConfigsInfo(const Target *target, const std::string &label, Scope *scope,
-    const OhosComponentChecker *checker, Err *err)
+static void TraverPrivateConfigsInfo(const Target *target, const OhosComponentChecker *checker, Err *err)
 {
-    std::string info = "";
-    const UniqueVector<LabelConfigPair> private_configs = target->configs();
+    const UniqueVector<LabelConfigPair> private_configs = target->own_configs();
     if (private_configs.size() > 0) {
-        PublicConfigInfoParams params = { target, label, err, false };
-        std::string tmp = GetPublicConfigInfo(params, scope, private_configs, checker);
-        if (tmp == "") {
-            return "";
-        }
+        (void)GetConfigInfo(target, private_configs, checker, err, false);
     }
-    return info;
 }
-
 
 static std::string GetPublicHeadersInfo(const Target *target)
 {
@@ -359,10 +285,11 @@ static std::string GetPublicDepsInfo(const Target *target, const std::string &la
     return info;
 }
 
-static std::string GetOutNameAndTypeInfo(const Scope *scope, const std::string &target, const std::string &type)
+static std::string GetOutNameAndTypeInfo(const Target *target, const std::string &module)
 {
+    std::string type(Target::GetStringForOutputType(target->output_type()));
     std::string info = "";
-    const std::string name = GetOutName(scope, target, type);
+    const std::string name = GetOutName(target, module, type);
     info += ",\n  \"out_name\":\"" + name + "\"";
     info += ",\n  \"type\":\"" + type + "\"";
     return info;
@@ -374,135 +301,86 @@ static std::string GetComponentInfo(const std::string &subsystem, const std::str
     info += ",\n  \"subsystem\":\"" + subsystem + "\"";
     info += ",\n  \"component\":\"" + component + "\"";
     info += ",\n  \"path\":\"" + path + "\"";
-    info += "\n}\n";
     return info;
 }
 
-static void WritePublicConfigs(const std::string &label, const std::string &info)
+static std::string GetPublicInfo(const Target *target, const std::string &label,
+    const OhosComponentChecker *checker, Err *err)
 {
-    int pos = label.find(":");
-    std::string dir = build_out_ + "/" + "external_public_configs" + label.substr(1, pos - 1);
-    std::string name = label.substr(pos + 1);
-
-    base::FilePath path(dir);
-    base::CreateDirectory(path);
-    std::ofstream public_file;
-    const std::string json_path = dir + "/" + name + ".json";
-    if (IsFileExists(json_path)) {
-        return;
-    }
-    public_file.open(json_path, std::ios::out);
-    public_file << info;
-    public_file.close();
-    return;
-}
-
-static bool CheckInExternalPublicConfigsMap(const std::string &label)
-{
-    if (external_public_configs_.find(label) != external_public_configs_.end() &&
-        external_public_configs_[label].empty()) {
-        return true;
-    }
-    return false;
-}
-
-static void FillPublicConfigs(const Config *config, const std::string &label)
-{
-    const std::vector<SourceDir> dirs = config->own_values().include_dirs();
-    for (const SourceDir &dir : dirs) {
-        SetExternalPublicConfigsValue(label, "include_dirs", dir.value());
-    }
-    GetFlagsInfo(config, label, true);
-    return;
-}
-
-static std::string GetExternalPublicConfigsInfo(const std::string &label)
-{
-    std::string info = "{";
-    info += "\n    \"label\": \"" + label + "\",\n";
-
-    bool first_outer = true;
-    for (const auto& pair : external_public_configs_[label]) {
-        if (!first_outer) {
-            info += ",\n";
-        }
-        first_outer = false;
-
-        info += "    \"" + pair.first + "\": [\n";
-        bool first_inner = true;
-        for (const auto& value : pair.second) {
-            if (!first_inner) {
-                info += ",\n";
-            }
-            first_inner = false;
-            info += "        \"" + value + "\"";
-        }
-        info += "\n    ]";
-    }
-    info += "\n}";
-    return info;
-}
-
-void InnerApiPublicInfoGenerator::GeneratedExternalPublicConfigs(const std::string &label, const Config *config)
-{
-    if (!CheckInExternalPublicConfigsMap(label)) {
-        return;
-    }
-    FillPublicConfigs(config, label);
-    WritePublicConfigs(label, GetExternalPublicConfigsInfo(label));
-    return;
-}
-
-void InnerApiPublicInfoGenerator::GeneratedInnerapiPublicInfo(const Target *target, const Label &label, Scope *scope,
-    const std::string &type, Err *err)
-{
-    if (target == nullptr || (ignoreTest_ && target->testonly())) {
-        return;
-    }
-    build_out_ = build_dir_;
-    const OhosComponentChecker *checker = OhosComponentChecker::getInstance();
-
-    std::string label_string = label.GetUserVisibleName(false);
-    std::string info = "{\n";
-
-    info += "  \"label\": \"" + label_string + "\"";
-    info += GetPublicConfigsInfo(target, label_string, scope, checker, err);
-    info += GetAllDependentConfigsInfo(target, label_string, scope, checker, err);
-    info += GetPrivateConfigsInfo(target, label_string, scope, checker, err);
-
-    if (checker != nullptr) {
-        if (!TraverIncludeDirs(checker, target, scope, label_string, err)) {
-            return;
-        }
-    }
-
+    std::string info = GetPublicConfigsInfo(target, checker, err);
+    info += GetAllDependentConfigsInfo(target, checker, err);
     if (target->all_headers_public()) {
         info += ",\n  \"public\": [ \"*\" ]";
     } else {
         info += GetPublicHeadersInfo(target);
     }
+    info += GetPublicDepsInfo(target, label, checker, err);
+    info += "\n}\n";
+    return info;
+}
 
-    info += GetPublicDepsInfo(target, label_string, checker, err);
-
-    const OhosComponent *component = target->ohos_component();
-    if (target->testonly() || component == nullptr || !component->isInnerApi(label_string)) {
-        return;
+static std::string GetBaseInfo(const Target *target, const std::string &label,
+    const std::string &module, const OhosComponent *component)
+{
+    std::string info = "{\n";
+    info += "  \"label\": \"" + label + "\"";
+    info += GetOutNameAndTypeInfo(target, module);
+    if (component != nullptr) {
+        info += GetComponentInfo(component->subsystem(), component->name(), component->path());
     }
-    int pos = label_string.find(":");
-    std::string target_name = label_string.substr(pos + 1, label_string.length() - 1);
-    info += GetOutNameAndTypeInfo(scope, target_name, type);
-    info += GetComponentInfo(component->subsystem(), component->name(), component->path());
+    return info;
+}
 
-    const std::string dir = build_dir_ + "/" + component->subsystem() + "/" + component->name() + "/publicinfo";
+static void WritePublicInfo(const std::string &build, const std::string &module,
+    const OhosComponent *component, const std::string &info)
+{
+    const std::string dir = build + "/" + component->subsystem() + "/" + component->name() + "/publicinfo";
     base::FilePath path(dir);
     base::CreateDirectory(path);
-    std::ofstream public_file;
-    const std::string json_path = dir + "/" + target_name + ".json";
-    if (IsFileExists(json_path)) {
+    std::ofstream file;
+    const std::string json = dir + "/" + module + ".json";
+    file.open(json, std::ios::out);
+    file << info;
+    file.close();
+}
+
+void InnerApiPublicInfoGenerator::DoGeneratedInnerapiPublicInfo(const Target *target,
+    const OhosComponentChecker *checker, Err *err)
+{
+    if (target == nullptr || (ignoreTest_ && target->testonly())) {
         return;
     }
-    public_file.open(json_path, std::ios::out);
-    public_file << info;
-    public_file.close();
+    std::string label = target->label().GetUserVisibleName(false);
+    size_t pos = label.find(":");
+    if (pos == std::string::npos) {
+        return;
+    }
+    std::string module = label.substr(pos + 1, label.length() - 1);
+    const OhosComponent *component = target->ohos_component();
+    std::string info = GetBaseInfo(target, label, module, component);
+    info += GetPublicInfo(target, label, checker, err);
+
+    if (!TraverIncludeDirs(target, checker, label, err)) {
+        return;
+    }
+    TraverPrivateConfigsInfo(target, checker, err);
+
+    if (target->testonly() || component == nullptr || !component->isInnerApi(label)) {
+        return;
+    }
+
+    WritePublicInfo(build_dir_, module, component, info);
     return;
+}
+
+bool InnerApiPublicInfoGenerator::GeneratedInnerapiPublicInfo(const std::vector<const Target*>& items, Err *err)
+{
+    const OhosComponentChecker *checker = OhosComponentChecker::getInstance();
+    for (const Target *item : items) {
+        DoGeneratedInnerapiPublicInfo(item, checker, err);
+        if (err->has_error()) {
+            return false;
+        }
+    }
+    return true;
 }

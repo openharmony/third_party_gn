@@ -26,9 +26,7 @@ struct PublicConfigInfoParams {
 
 class InnerApiPublicInfoGenerator {
 public:
-    void GeneratedInnerapiPublicInfo(const Target *target, const Label &label,
-        Scope *scope, const std::string &type, Err *err);
-    void GeneratedExternalPublicConfigs(const std::string &label, const Config *config);
+    bool GeneratedInnerapiPublicInfo(const std::vector<const Target*>& items, Err *err);
 
     static InnerApiPublicInfoGenerator *getInstance()
     {
@@ -48,6 +46,7 @@ private:
     std::string build_dir_;
     int checkType_ = OhosComponentChecker::CheckType::NONE;
     static InnerApiPublicInfoGenerator *instance_;
+    void DoGeneratedInnerapiPublicInfo(const Target *target, const OhosComponentChecker *checker, Err *err);
     InnerApiPublicInfoGenerator(const std::string &build_dir, int checkType)
     {
         checkType_ = checkType;
