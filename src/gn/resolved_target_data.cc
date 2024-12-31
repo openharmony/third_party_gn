@@ -193,7 +193,7 @@ void ResolvedTargetData::ComputeRustLibsFor(base::span<const Target*> deps,
         dep->output_type() == Target::SHARED_LIBRARY ||
         dep->output_type() == Target::SOURCE_SET ||
         dep->output_type() == Target::RUST_LIBRARY ||
-        dep->output_type() == Target::GROUP) {
+        dep->output_type() == Target::GROUP || dep->copy_linkable_file()) {
       // Here we have: `this` --[depends-on]--> `dep`
       //
       // The `this` target has direct access to `dep` since its a direct

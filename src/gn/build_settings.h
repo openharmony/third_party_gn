@@ -151,7 +151,11 @@ class BuildSettings {
     exec_script_whitelist_ = std::move(list);
   }
 
- private:
+  const OhosComponent *GetOhosComponentByName(const std::string &component_name) const;
+
+  bool isOhosIndepCompilerEnable() const;
+
+private:
   Label root_target_label_;
   std::vector<LabelPattern> root_patterns_;
   base::FilePath dotfile_name_;

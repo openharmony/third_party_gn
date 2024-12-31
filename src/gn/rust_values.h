@@ -69,6 +69,8 @@ class RustValues {
   // (TODO: Should it?)
   static bool IsRustLibrary(const Target* target);
 
+  static std::string GetCrateTypeStr(CrateType crateType);
+
   // Any renamed dependencies for the `extern` flags.
   const std::map<Label, std::string>& aliased_deps() const {
     return aliased_deps_;

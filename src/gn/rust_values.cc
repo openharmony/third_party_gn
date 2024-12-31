@@ -52,3 +52,22 @@ bool RustValues::IsRustLibrary(const Target* target) {
          InferredCrateType(target) == CRATE_DYLIB ||
          InferredCrateType(target) == CRATE_PROC_MACRO;
 }
+
+std::string RustValues::GetCrateTypeStr(const CrateType crateType) {
+  switch (crateType) {
+    case CRATE_BIN:
+      return "bin";
+    case CRATE_DYLIB:
+      return "dylib";
+    case CRATE_CDYLIB:
+      return "cdylib";
+    case CRATE_PROC_MACRO:
+      return "proc-macro";
+    case CRATE_RLIB:
+      return "rlib";
+    case CRATE_STATICLIB:
+      return "staticlib";
+    default:
+      return "";
+  }
+}

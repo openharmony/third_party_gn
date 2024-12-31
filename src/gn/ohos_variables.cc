@@ -79,4 +79,11 @@ Example
   }
 )";
 
+const char kCopyRustCrateType[] = "rust_crate_type";
+const char kCopyRustCrateType_HelpShort[] = "";
+const char kCopyRustCrateType_Help[] = "";
+
+const char kCopyRustCrateName[] = "rust_crate_name";
+const char kCopyRustCrateName_HelpShort[] = "";
+const char kCopyRustCrateName_Help[] = "";
 }  // namespace variables

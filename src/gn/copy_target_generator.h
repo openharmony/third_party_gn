@@ -25,6 +25,7 @@ class CopyTargetGenerator : public TargetGenerator {
   CopyTargetGenerator& operator=(const CopyTargetGenerator&) = delete;
 
   bool FillCopyLinkableFile();
+  bool FillCopyRustTargetInfo();
 };
 
 #endif  // TOOLS_GN_COPY_TARGET_GENERATOR_H_

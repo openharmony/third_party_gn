@@ -30,6 +30,54 @@ bool CopyTargetGenerator::FillCopyLinkableFile()
   return true;
 }
 
+bool CopyTargetGenerator::FillCopyRustTargetInfo() {
+  const Value* rustCrateType =
+      scope_->GetValue(variables::kCopyRustCrateType, true);
+  const Value* rustCrateName =
+      scope_->GetValue(variables::kCopyRustCrateName, true);
+
+  if (!rustCrateName || !rustCrateType) {
+    return true;
+  }
+
+  if (!(rustCrateType->VerifyTypeIs(Value::STRING, err_) &&
+        rustCrateName->VerifyTypeIs(Value::STRING, err_)))
+    return false;
+
+  target_->rust_values().crate_name() =
+      std::move(rustCrateName->string_value());
+
+  if (rustCrateType->string_value() == "bin") {
+    target_->rust_values().set_crate_type(RustValues::CRATE_BIN);
+    return true;
+  }
+  if (rustCrateType->string_value() == "cdylib") {
+    target_->rust_values().set_crate_type(RustValues::CRATE_CDYLIB);
+    return true;
+  }
+  if (rustCrateType->string_value() == "dylib") {
+    target_->rust_values().set_crate_type(RustValues::CRATE_DYLIB);
+    return true;
+  }
+  if (rustCrateType->string_value() == "proc-macro") {
+    target_->rust_values().set_crate_type(RustValues::CRATE_PROC_MACRO);
+    return true;
+  }
+  if (rustCrateType->string_value() == "rlib") {
+    target_->rust_values().set_crate_type(RustValues::CRATE_RLIB);
+    return true;
+  }
+  if (rustCrateType->string_value() == "staticlib") {
+    target_->rust_values().set_crate_type(RustValues::CRATE_STATICLIB);
+    return true;
+  }
+
+  *err_ =
+      Err(rustCrateType->origin(),
+          "Inadmissible crate type \"" + rustCrateType->string_value() + "\".");
+  return false;
+}
+
 void CopyTargetGenerator::DoRun() {
   target_->set_output_type(Target::COPY_FILES);
 
@@ -55,5 +103,8 @@ void CopyTargetGenerator::DoRun() {
   }
   
   if (!FillCopyLinkableFile())
+    return;
+
+  if (!FillCopyRustTargetInfo())
     return;
 }

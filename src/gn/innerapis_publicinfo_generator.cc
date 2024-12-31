@@ -23,6 +23,7 @@
 #include "gn/substitution_writer.h"
 #include "gn/target.h"
 #include "gn/value.h"
+#include "gn/standard_out.h"
 
 InnerApiPublicInfoGenerator *InnerApiPublicInfoGenerator::instance_ = nullptr;
 
@@ -31,39 +32,68 @@ static bool StartWith(const std::string &str, const std::string &prefix)
     return (str.rfind(prefix, 0) == 0);
 }
 
-static std::string GetOutName(const Target *target, const std::string &module, const std::string &type)
+static std::string GetOutName(const Target *target, const std::string &module, const std::string &type, RustValues::CrateType crateType)
 {
     std::string output = target->output_name();
     std::string extension = target->output_extension();
+    if(extension != ""){
+      extension = "." + extension;
+    }else{
+      if (crateType == RustValues::CRATE_AUTO){
+        if (type == "shared_library") {
+          extension = ".z.so";
+        } else if (type == "static_library") {
+          extension = ".a";
+        }
+      }else{
+        if(crateType == RustValues::CRATE_RLIB){
+          extension = ".rlib";
+        }else if(crateType == RustValues::CRATE_DYLIB || crateType == RustValues::CRATE_PROC_MACRO){
+          extension = ".dylib.so";
+        } else if(crateType == RustValues::CRATE_STATICLIB){
+          extension = ".a";
+        } else if(crateType == RustValues::CRATE_CDYLIB){
+          extension = ".z.so";
+        }
+      }
+    }
+    if (output  == "") {
+      output  = module;
+    }
+    if (!StartWith(output , "lib") && crateType != RustValues::CRATE_BIN && type != "executable"){
+      output  = "lib" + output ;
+    }
+    return output  + extension;
+}
 
-    if (output == "") {
-        output = module;
+static std::string GetRustCrateInfo(const Target* target, const Label& toolchain_label)
+{
+    std::string info = "";
+    if (target->has_rust_values()) {
+        info += ",\n  \"rust_crate_name\": \"" + target->rust_values().crate_name() + "\",";
+        info += "\n  \"rust_crate_type\": \"" + RustValues::GetCrateTypeStr(RustValues::InferredCrateType(target)) + "\"";
+        auto private_deps = target->private_deps();
+        if (private_deps.size() > 0) {
+            info += ",\n  \"rust_deps\": [\n    ";
+            bool first = true;
+            for (const auto& dep : private_deps) {
+                std::string dep_str = dep.label.GetUserVisibleName(toolchain_label);
+                if (dep_str.find("__check") != std::string::npos ||
+                    dep_str.find("__info") != std::string::npos ||
+                    dep_str.find("__notice") != std::string::npos ||
+                    dep_str.find("__collect") != std::string::npos) {
+                    continue;
+                }
+                if (!first) {
+                    info += ",\n    ";
+                }
+                first = false;
+                info += "\"" + dep_str + "\"";
+            }
+            info += "\n  ]";
+        }
     }
-    if (type == "shared_library") {
-        if (extension == "") {
-            extension = ".z.so";
-        } else {
-            extension = "." + extension;
-        }
-        if (!StartWith(output, "lib")) {
-            output = "lib" + output;
-        }
-    } else if (type == "static_library") {
-        extension = ".a";
-        if (!StartWith(output, "lib")) {
-            output = "lib" + output;
-        }
-    } else if (type == "rust_library") {
-        if (extension == "") {
-            extension = ".dylib.so";
-        } else {
-            extension = "." + extension;
-        }
-        if (!StartWith(output, "lib")) {
-            output = "lib" + output;
-        }
-    }
-    return output + extension;
+    return info;
 }
 
 static bool TraverIncludeDirs(const Target *target, const OhosComponentChecker *checker,
@@ -289,7 +319,21 @@ static std::string GetOutNameAndTypeInfo(const Target *target, const std::string
 {
     std::string type(Target::GetStringForOutputType(target->output_type()));
     std::string info = "";
-    const std::string name = GetOutName(target, module, type);
+    RustValues::CrateType crate_type = target->has_rust_values() ? target->rust_values().crate_type() : RustValues::CrateType::CRATE_AUTO;
+    const std::string name = GetOutName(target, module, type, crate_type);
+    const std::vector<OutputFile>& outputFiles = target->computed_outputs();
+    if (outputFiles.size() > 0) {
+      info += ",\n  \"outputs\": [\n    ";
+      bool first = true;
+      for (const auto& outputFile : outputFiles) {
+        if (!first) {
+          info += ",\n    ";
+        }
+        first = false;
+        info += "\"" + outputFile.value() + "\"";
+      }
+      info += "\n  ]";
+    }
     info += ",\n  \"out_name\":\"" + name + "\"";
     info += ",\n  \"type\":\"" + type + "\"";
     return info;
@@ -325,6 +369,7 @@ static std::string GetBaseInfo(const Target *target, const std::string &label,
     std::string info = "{\n";
     info += "  \"label\": \"" + label + "\"";
     info += GetOutNameAndTypeInfo(target, module);
+    info += GetRustCrateInfo(target, target->settings()->default_toolchain_label());
     if (component != nullptr) {
         info += GetComponentInfo(component->subsystem(), component->name(), component->path());
     }
@@ -377,9 +422,11 @@ bool InnerApiPublicInfoGenerator::GeneratedInnerapiPublicInfo(const std::vector<
 {
     const OhosComponentChecker *checker = OhosComponentChecker::getInstance();
     for (const Target *item : items) {
-        DoGeneratedInnerapiPublicInfo(item, checker, err);
-        if (err->has_error()) {
+        if (item->ohos_component()) {
+          DoGeneratedInnerapiPublicInfo(item, checker, err);
+          if (err->has_error()) {
             return false;
+          }
         }
     }
     return true;
