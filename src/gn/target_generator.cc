@@ -74,6 +74,8 @@ void TargetGenerator::Run() {
   if (!FillWriteRuntimeDeps())
     return;
 
+  FillCheckFlag();
+
   // Do type-specific generation.
   DoRun();
 }
@@ -366,6 +368,16 @@ bool TargetGenerator::FillTestonly() {
     target_->set_testonly(value->boolean_value());
   }
   return true;
+}
+
+void TargetGenerator::FillCheckFlag() {
+  const Value* value = scope_->GetValue("check_flag", true);
+  if (value) {
+    if (!value->VerifyTypeIs(Value::BOOLEAN, err_))
+      return;
+    target_->set_checkflag(value->boolean_value());
+  }
+  return;
 }
 
 bool TargetGenerator::FillAssertNoDeps() {

@@ -74,6 +74,7 @@ class TargetGenerator {
   bool FillTestonly();
   bool FillAssertNoDeps();
   bool FillWriteRuntimeDeps();
+  void FillCheckFlag();
 
   // Reads configs/deps from the given var name, and uses the given setting on
   // the target to save them.
