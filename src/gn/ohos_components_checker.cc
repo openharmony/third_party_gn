@@ -527,6 +527,10 @@ bool OhosComponentChecker::CheckInnerApiNotLib(const Item *item, const OhosCompo
         return true;
     }
 
+    if (type == Target::GROUP && item->checkflag() == false) {
+        return true;
+    }
+
     if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
         return InterceptDepsNotLib(item, label, deps, err) && InterceptInnerApiNotLib(item, deps, err);
     }

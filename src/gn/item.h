@@ -42,6 +42,9 @@ class Item {
   bool testonly() const { return testonly_; }
   void set_testonly(bool value) { testonly_ = value; }
 
+  bool checkflag() const { return checkflag_; }
+  void set_checkflag(bool value) { checkflag_ = value; }
+
   Visibility& visibility() { return visibility_; }
   const Visibility& visibility() const { return visibility_; }
 
@@ -83,6 +86,7 @@ class Item {
   const ParseNode* defined_from_;
 
   bool testonly_ = false;
+  bool checkflag_ = true;
   Visibility visibility_;
 
   const OhosComponent *component;
