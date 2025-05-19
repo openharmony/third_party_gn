@@ -28,6 +28,7 @@ static const std::string SCAN_RESULT_PATH = "scan_out";
 static const std::string WHITELIST_PATH = "component_compilation_whitelist.json";
 static const int BASE_BINARY = 1;
 static std::vector<std::string> all_deps_config_;
+static std::map<std::string, std::vector<std::string>> public_deps_;
 static std::vector<std::string> includes_over_range_;
 static std::map<std::string, std::vector<std::string>> innerapi_public_deps_inner_;
 static std::vector<std::string> innerapi_not_lib_;
@@ -103,6 +104,15 @@ static void LoadInnerApiPublicDepsInnerWhitelist(const base::Value &value)
     }
 }
 
+static void LoadPublicDepsWhitelist(const base::Value &value)
+{
+    for (auto info : value.DictItems()) {
+        for (const base::Value &value_tmp : info.second.GetList()) {
+            public_deps_[info.first].push_back(value_tmp.GetString());
+        }
+    }
+}
+
 static void LoadInnerApiNotLibWhitelist(const base::Value &list)
 {
     for (const base::Value &value : list.GetList()) {
@@ -168,6 +178,7 @@ static std::map<std::string, std::function<void(const base::Value &value)>> whit
     { "innerapi_not_lib", LoadInnerApiNotLibWhitelist },
     { "innerapi_not_declare", LoadInnerApiNotDeclareWhitelist },
     { "innerapi_public_deps_inner", LoadInnerApiPublicDepsInnerWhitelist },
+    { "public_deps", LoadPublicDepsWhitelist },
     { "includes_absolute_deps_other", LoadIncludesAbsoluteDepsOtherWhitelist },
     { "target_absolute_deps_other", LoadAbsoluteDepsOtherWhitelist },
     { "import_other", LoadImportOtherWhitelist },
@@ -259,9 +270,28 @@ bool OhosComponentChecker::InterceptInnerApiPublicDepsInner(const Target *target
         }
     }
     *err = Err(target->defined_from(), "InnerApi not allow the use of public_deps dependent internal modules.",
-        "The item " + label + " not allow the use of public_deps dependent internal modules : " + deps);
+        "The item " + label + " not allow the use of public_deps dependent internal module : " + deps);
     return false;
 }
+
+bool OhosComponentChecker::InterceptPublicDeps(const Target *target, const std::string &label,
+        const std::string &deps, Err *err) const
+    {
+        if (!IsIntercept(ruleSwitch_, PUBLIC_DEPS_BINARY)) {
+            return true;
+        }
+    
+        if (auto res = public_deps_.find(label); res != public_deps_.end()) {
+            std::string deps_str(deps);
+            auto res_second = std::find(res->second.begin(), res->second.end(), Trim(deps_str));
+            if (res_second != res->second.end()) {
+                return true;
+            }
+        }
+        *err = Err(target->defined_from(), "public_deps/public_external_deps not allowed.",
+            "The item " + label + " not allow the use of public_deps/public_external_deps dependent module : " + deps);
+         return false;
+     }
 
 bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::string &label, Err *err) const
 {
@@ -512,6 +542,22 @@ bool OhosComponentChecker::CheckInnerApiPublicDepsInner(const Target *target, co
     GenerateScanList("innerapi_public_deps_inner.list", component->subsystem(), component->name(), label, deps);
     return true;
 }
+
+bool OhosComponentChecker::CheckPublicDeps(const Target *target, const std::string &label,
+        const std::string &deps, Err *err) const
+    {
+        if (checkType_ <= CheckType::NONE || target == nullptr || (ignoreTest_ && target->testonly())) {
+            return true;
+        }
+    
+        if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
+            return InterceptPublicDeps(target, label, deps, err);
+        }
+        const OhosComponent *component = target->ohos_component();
+        GenerateScanList("public_deps.list", component == nullptr ? "" : component->subsystem(),
+            component == nullptr ? "" : component->name(), label, deps);
+        return true;
+    }
 
 bool OhosComponentChecker::CheckInnerApiNotLib(const Item *item, const OhosComponent *component,
     const std::string &label, const std::string &deps, Err *err) const
