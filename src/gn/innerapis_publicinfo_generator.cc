@@ -309,6 +309,9 @@ static std::string GetPublicDepsInfo(const Target *target, const std::string &la
             if (!checker->CheckInnerApiPublicDepsInner(target, label, dep_str, err)) {
                 return "";
             }
+            if (!checker->CheckPublicDeps(target, label, dep_str, err)) {
+                return "";
+            }
         }
         info += "\n  ]";
     }

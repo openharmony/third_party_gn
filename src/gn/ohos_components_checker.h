@@ -35,6 +35,7 @@ public:
         TARGET_ABSOLUTE_DEPS_OTHER_BINARY,
         IMPORT_OTHER_BINARY,
         INNERAPI_VISIBILITY_DENIED,
+        PUBLIC_DEPS_BINARY,
         ALL
     };
 
@@ -50,6 +51,8 @@ public:
     bool CheckInnerApiIncludesOverRange(const Target *target, const std::string &label, const std::string &dir,
         Err *err) const;
     bool CheckInnerApiPublicDepsInner(const Target *target, const std::string &label, const std::string &deps,
+        Err *err) const;
+    bool CheckPublicDeps(const Target *target, const std::string &label, const std::string &deps,
         Err *err) const;
     bool CheckInnerApiNotLib(const Item *item, const OhosComponent *component, const std::string &label,
         const std::string &deps, Err *err) const;
@@ -79,6 +82,8 @@ private:
     bool InterceptIncludesOverRange(const Target *target, const std::string &label, const std::string &dir,
         Err *err) const;
     bool InterceptInnerApiPublicDepsInner(const Target *target, const std::string &label, const std::string &deps,
+        Err *err) const;
+    bool InterceptPublicDeps(const Target *target, const std::string &label, const std::string &deps,
         Err *err) const;
     bool InterceptInnerApiNotLib(const Item *item, const std::string &label, Err *err) const;
     bool InterceptDepsNotLib(const Item *item, const std::string &label, const std::string &deps, Err *err) const;
