@@ -33,14 +33,32 @@ static const int PATH_PREFIX_LEN = 2;
 
 OhosComponent::OhosComponent() = default;
 
-OhosComponent::OhosComponent(const char *name, const char *subsystem, const char *path)
+static std::string GetPath(const char *path)
+{
+    std::string process_path;
+    if (strncmp(path, "//", PATH_PREFIX_LEN) == 0) {
+        process_path = std::string(path);
+    } else {
+        process_path = "//" + std::string(path);
+    }
+    return process_path;
+}
+
+OhosComponent::OhosComponent(const char *name, const char *subsystem, const char *path,
+    const std::vector<std::string> &modulePath, bool special_parts_switch)
 {
     name_ = std::string(name);
     subsystem_ = std::string(subsystem);
-    if (strncmp(path, "//", PATH_PREFIX_LEN) == 0) {
-        path_ = std::string(path);
+    path_ = GetPath(path);
+    special_parts_switch_ = special_parts_switch;
+
+    auto result = std::find(modulePath.begin(), modulePath.end, std::string(path));
+    if (result == modulePath.end()) {
+        module_path_.push_back(path_);
     } else {
-        path_ = "//" + std::string(path);
+        for (const auto &module_path : modulePath) {
+            module_path_.push_back(GetPath(module_path_.c_str()));
+        }
     }
 }
 
@@ -102,13 +120,35 @@ bool OhosComponentsImpl::ReadBuildConfigFile(const std::string &build_dir, const
     std::string path = build_dir;
     path += "/build_configs/";
     path += subfile;
-    if (!base::ReadFileToString(base::FilePath(path), &content)) {
-        return false;
-    }
-    return true;
+    return base::ReadFileToString(base::FilePath(path), &content);
 }
 
-bool OhosComponentsImpl::LoadComponentInfo(const std::string &components_content, std::string &err_msg_out)
+static bool GetComponentPath(std::string &content)
+{
+    std::string whiteListPath = "out/products_ext?component_path_whitelist.json";
+    return base::ReadFileToString(base::FilePath(whiteListPath), &content);
+}
+
+static std::vector<std::string> GetModulePath(const std::string &path, base::ListValue *list)
+{
+    std::vector<std::string> module_path;
+    for (const base::Value &value : list->GetList()) {
+        const base::Value *component_path = value.FindKey("component_path");
+        if (!component_path) {
+            continue;
+        }
+        if (component_path->GetString() == path) {
+            for (const base::Value &item : value.FindKey("module_path")->GetList()) {
+                module_path.push_back(item.GetString());
+            }
+            return module_path;
+        }
+    }
+    return module_path;
+}
+
+bool OhosComponentsImpl::LoadComponentInfo(const std::string &components_content, bool special_parts_switch,
+    std::string &err_msg_out)
 {
     const base::DictionaryValue *components_dict;
     std::unique_ptr<base::Value> components_value = base::JSONReader::ReadAndReturnError(components_content,
@@ -120,14 +160,33 @@ bool OhosComponentsImpl::LoadComponentInfo(const std::string &components_content
         return false;
     }
 
+    std::string components_path_content;
+    base::ListValue *components_path_list;
+    bool is_read_path = false;
+    std::unique_ptr<base::Value> components_path_value;
+    if (special_parts_switch && GetComponentPath(components_path_content)) {
+        components_path_value = base::JSONReader::ReadAndReturnError(components_path_content,
+            base::JSONParserOptions::JSON_PARSE_RFC, nullptr, &err_msg_out, nullptr, nullptr);
+        if (components_path_value) {
+            is_read_path = components_path_value->GetAsList(&components_path_list);
+        }
+    }
+
     for (const auto com : components_dict->DictItems()) {
         const base::Value *subsystem = com.second.FindKey("subsystem");
         const base::Value *path = com.second.FindKey("path");
         if (!subsystem || !path) {
             continue;
         }
+
+        std::vector<std::string> module_path;
+        if (special_parts_switch && is_read_path) {
+            module_path = GetModulePath(path-> GetString(), components_path_list);
+        }
+
         components_[com.first] =
-            new OhosComponent(com.first.c_str(), subsystem->GetString().c_str(), path->GetString().c_str());
+            new OhosComponent(com.first.c_str(), subsystem->GetString().c_str(), path->GetString().c_str(),
+            module_path, special_parts_switch);
         const base::Value *innerapis = com.second.FindKey("innerapis");
         if (!innerapis) {
             continue;
@@ -161,6 +220,7 @@ const struct OhosComponentTree *OhosComponentsImpl::findChildByPath(const struct
 const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label)
 {
     const struct OhosComponentTree *child;
+    const struct OhosComponentTree *previous = pathTree
     const struct OhosComponentTree *current = pathTree;
 
     if (!label) {
@@ -191,7 +251,12 @@ const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label
         // Match with children
         child = findChildByPath(current, label, len);
         if (child == nullptr) {
-            break;
+            if (current_>child != nullptr && previous->component != nullptr &&
+                previous->component->specialPartsSwitch()) {
+                    return previous->component;
+                } else {
+                    break;
+                }
         }
 
         // No children, return current matched item
@@ -203,6 +268,11 @@ const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label
         // Finish matching if target name started
         if (label[0] == ':') {
             return child->component;
+        }
+
+        // Save previous part target
+        if (child->component != nullptr) {
+            previous = child
         }
 
         // Match with child again
@@ -219,37 +289,42 @@ const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label
 
 void OhosComponentsImpl::addComponentToTree(struct OhosComponentTree *current, OhosComponent *component)
 {
-    size_t len;
-    const char *path = component->path().c_str() + PATH_PREFIX_LEN;
-    const char *sep;
-
-    while (path[0] != '\0') {
-        sep = strchr(path, '/');
-        if (sep) {
-            len = sep - path;
-        } else {
-            len = strlen(path);
+    std::vector<std::string> module_path = component->modulePath();
+    struct OhosComponentTree *origin = current;
+    for (const auto &part_path : module_path) {
+        size_t len;
+        const char *path = component->path().c_str() + PATH_PREFIX_LEN;
+        const char *sep;
+        current = origin;
+    
+        while (path[0] != '\0') {
+            sep = strchr(path, '/');
+            if (sep) {
+                len = sep - path;
+            } else {
+                len = strlen(path);
+            }
+    
+            // Check if node already exists
+            struct OhosComponentTree *child = (struct OhosComponentTree *)findChildByPath(current, path, len);
+            if (!child) {
+                // Add intermediate node
+                child = new struct OhosComponentTree(path, len, nullptr);
+                child->next = current->child;
+                current->child = child;
+            }
+    
+            // End of path detected, setup component pointer
+            path = path + len;
+            if (path[0] == '\0') {
+                child->component = component;
+                break;
+            }
+    
+            // Continue to add next part
+            path += 1;
+            current = child;
         }
-
-        // Check if node already exists
-        struct OhosComponentTree *child = (struct OhosComponentTree *)findChildByPath(current, path, len);
-        if (!child) {
-            // Add intermediate node
-            child = new struct OhosComponentTree(path, len, nullptr);
-            child->next = current->child;
-            current->child = child;
-        }
-
-        // End of path detected, setup component pointer
-        path = path + len;
-        if (path[0] == '\0') {
-            child->component = component;
-            break;
-        }
-
-        // Continue to add next part
-        path += 1;
-        current = child;
     }
 }
 
@@ -334,7 +409,7 @@ void OhosComponentsImpl::LoadToolchain(const Value *product)
 }
 
 bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const Value *enable,
-    const Value *indep, const Value *product, Err *err)
+    const Value *indep, const Value *product, bool special_parts_switch, Err *err)
 {
     const char *components_file = "parts_info/components.json";
     std::string components_content;
@@ -351,7 +426,7 @@ bool OhosComponentsImpl::LoadOhosComponents(const std::string &build_dir, const 
     }
 
     std::string err_msg_out;
-    if (!LoadComponentInfo(components_content, err_msg_out)) {
+    if (!LoadComponentInfo(components_content, special_parts_switch, err_msg_out)) {
         *err = Err(*enable, "Your .gn file has enabled \"ohos_components_support\", but "
             "OpenHarmony build config file parsing failed:\n" +
             err_msg_out + "\n");
@@ -490,7 +565,7 @@ bool OhosComponentsImpl::GetSubsystemName(const Value &component_name, std::stri
 OhosComponents::OhosComponents() = default;
 
 bool OhosComponents::LoadOhosComponents(const std::string &build_dir,
-    const Value *enable, const Value *indep, const Value *product, Err *err)
+    const Value *enable, const Value *indep, const Value *product, bool special_parts_switch, Err *err)
 {
     if (!enable) {
         // Not enabled
@@ -507,7 +582,7 @@ bool OhosComponents::LoadOhosComponents(const std::string &build_dir,
 
     mgr = new OhosComponentsImpl();
 
-    if (!mgr->LoadOhosComponents(build_dir, enable, indep, product, err)) {
+    if (!mgr->LoadOhosComponents(build_dir, enable, indep, product, special_parts_switch, err)) {
         delete mgr;
         mgr = nullptr;
         return false;

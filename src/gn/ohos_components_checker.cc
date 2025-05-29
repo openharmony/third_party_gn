@@ -509,7 +509,14 @@ bool OhosComponentChecker::CheckInnerApiIncludesOverRange(const Target *target, 
         return true;
     }
 
-    if (dir != "." && dir != "./" && dir != "../" && dir != component->path() && dir != component->path() + "/") {
+    bool is_part_path = false
+    for (const auto &path : component->modulePath()) {
+        if (dir == path || dir == path + "/") {
+            is_part_path = true;
+            break;
+        }
+    }
+    if (dir != "." && dir != "./" && dir != "../" && !is_part_path) {
         return true;
     }
 
@@ -532,7 +539,15 @@ bool OhosComponentChecker::CheckInnerApiPublicDepsInner(const Target *target, co
         return true;
     }
 
-    if (!StartWith(deps, component->path()) && StartWith(deps, "//")) {
+    bool is_same_part = false;
+    for (const auto &path : component->modulePath()) {
+        if (StartWith(deps, path)) {
+            is_same_part = true;
+            break;
+        }
+    }
+
+    if (!is_same_part && StartWith(deps, "//")) {
         return true;
     }
 
@@ -621,8 +636,10 @@ bool OhosComponentChecker::CheckIncludesAbsoluteDepsOther(const Target *target, 
         return true;
     }
 
-    if (StartWith(includes, component->path())) {
-        return true;
+    for(const auto &path : component->modulePath()) {
+        if (StartWith(includes, path)) {
+            return true;
+        }
     }
 
     if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
@@ -698,9 +715,15 @@ bool OhosComponentChecker::CheckImportOther(const FunctionCallNode *function, co
     if (component == nullptr) {
         return true;
     }
-    if (StartWith(deps, component->path()) || StartWith(deps, "//build/") || StartWith(deps, "//out/")
+    if (StartWith(deps, "//build/") || StartWith(deps, "//out/")
         || StartWith(deps, "//prebuilts/")) {
         return true;
+    }
+
+    for (const auto &path : component->modulePath()) {
+        if (StartWith(deps, path)) {
+            return true;
+        }
     }
 
     if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
