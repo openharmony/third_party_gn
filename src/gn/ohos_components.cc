@@ -52,7 +52,7 @@ OhosComponent::OhosComponent(const char *name, const char *subsystem, const char
     path_ = GetPath(path);
     special_parts_switch_ = special_parts_switch;
 
-    auto result = std::find(modulePath.begin(), modulePath.end, std::string(path));
+    auto result = std::find(modulePath.begin(), modulePath.end(), std::string(path));
     if (result == modulePath.end()) {
         module_path_.push_back(path_);
     } else {
@@ -125,7 +125,7 @@ bool OhosComponentsImpl::ReadBuildConfigFile(const std::string &build_dir, const
 
 static bool GetComponentPath(std::string &content)
 {
-    std::string whiteListPath = "out/products_ext?component_path_whitelist.json";
+    std::string whiteListPath = "out/products_ext/component_path_whitelist.json";
     return base::ReadFileToString(base::FilePath(whiteListPath), &content);
 }
 
@@ -293,7 +293,7 @@ void OhosComponentsImpl::addComponentToTree(struct OhosComponentTree *current, O
     struct OhosComponentTree *origin = current;
     for (const auto &part_path : module_path) {
         size_t len;
-        const char *path = component->path().c_str() + PATH_PREFIX_LEN;
+        const char *path = part_path.c_str() + PATH_PREFIX_LEN;
         const char *sep;
         current = origin;
     
