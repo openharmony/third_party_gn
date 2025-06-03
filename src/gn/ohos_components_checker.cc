@@ -509,7 +509,7 @@ bool OhosComponentChecker::CheckInnerApiIncludesOverRange(const Target *target, 
         return true;
     }
 
-    bool is_part_path = false
+    bool is_part_path = false;
     for (const auto &path : component->modulePath()) {
         if (dir == path || dir == path + "/") {
             is_part_path = true;
