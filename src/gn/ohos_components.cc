@@ -57,7 +57,7 @@ OhosComponent::OhosComponent(const char *name, const char *subsystem, const char
         module_path_.push_back(path_);
     } else {
         for (const auto &module_path : modulePath) {
-            module_path_.push_back(GetPath(module_path_.c_str()));
+            module_path_.push_back(GetPath(module_path.c_str()));
         }
     }
 }
@@ -220,7 +220,7 @@ const struct OhosComponentTree *OhosComponentsImpl::findChildByPath(const struct
 const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label)
 {
     const struct OhosComponentTree *child;
-    const struct OhosComponentTree *previous = pathTree
+    const struct OhosComponentTree *previous = pathTree;
     const struct OhosComponentTree *current = pathTree;
 
     if (!label) {
@@ -251,7 +251,7 @@ const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label
         // Match with children
         child = findChildByPath(current, label, len);
         if (child == nullptr) {
-            if (current_>child != nullptr && previous->component != nullptr &&
+            if (current->child != nullptr && previous->component != nullptr &&
                 previous->component->specialPartsSwitch()) {
                     return previous->component;
                 } else {
@@ -272,7 +272,7 @@ const OhosComponent *OhosComponentsImpl::matchComponentByLabel(const char *label
 
         // Save previous part target
         if (child->component != nullptr) {
-            previous = child
+            previous = child;
         }
 
         // Match with child again
