@@ -445,7 +445,12 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
       dotfile_scope_.GetValue("ohos_components_support", true);
   const Value *independent = build_settings_.build_args().GetArgOverride("ohos_indep_compiler_enable");
   const Value *product = build_settings_.build_args().GetArgOverride("product_name");
-  if (!ohos_components_.LoadOhosComponents(build_dir, support, independent, product, err)) {
+  const Value* special_parts_scan_switch = build_settings_.build_args().GetArgOverride("special_parts_scan_switch");
+  bool special_parts_switch = false;
+  if (special_parts_scan_switch && special_parts_scan_switch->type() == Value::BOOLEAN) {
+      special_parts_switch = special_parts_scan_switch->boolean_value();
+  }
+  if (!ohos_components_.LoadOhosComponents(build_dir, support, independent, product, special_parts_switch, err)) {
     return false;
   }
 

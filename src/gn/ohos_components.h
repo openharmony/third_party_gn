@@ -16,7 +16,8 @@
 class OhosComponent {
 public:
     OhosComponent();
-    OhosComponent(const char *name, const char *subsystem, const char *path);
+    OhosComponent(const char *name, const char *subsystem, const char *path,
+        const std::vector<std::string> &modulePath, bool special_parts_switch);
 
     const std::string &name() const
     {
@@ -30,7 +31,14 @@ public:
     {
         return path_;
     }
-
+    const std::vector<std::string> &modulePath() const
+    {
+        return module_path_;
+    }
+    const bool &specialPartsSwitch() const
+    {
+        return special_parts_switch_;
+    }
     void addInnerApi(const std::string &name, const std::string &label);
 
     const std::string &getInnerApi(const std::string &innerapi) const;
@@ -45,6 +53,8 @@ private:
     std::string name_;
     std::string subsystem_;
     std::string path_;
+    std::vector<std::string> module_path_;
+    bool special_parts_switch_ = false;
 
     // InnerApi name to label map
     std::map<std::string, std::string> innerapi_names_;
@@ -65,7 +75,7 @@ public:
     OhosComponents();
 
     bool LoadOhosComponents(const std::string &build_dir, const Value *enable,
-        const Value *indep, const Value *product, Err *err);
+        const Value *indep, const Value *product, bool special_parts_switch, Err *err);
 
     bool isOhosComponentsLoaded() const;
 

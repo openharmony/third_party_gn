@@ -41,7 +41,7 @@ static const std::string COMPONENT_PATHS = "{"
         "}";
 
 TEST(OhosComponent, ComponentInnerApi) {
-    OhosComponent com("foo", "samples", "components/foo");
+    OhosComponent com("foo", "samples", "components/foo", {"components/foo"}, false);
     EXPECT_EQ("foo", com.name());
     EXPECT_EQ("samples", com.subsystem());
     EXPECT_EQ("//components/foo", com.path());
@@ -76,7 +76,7 @@ TEST(OhosComponent, ComponentInnerApi) {
 TEST(OhosComponentsImpl, LoadComponentSubsystemAndPaths) {
     OhosComponentsImpl *mgr = new OhosComponentsImpl();
     std::string errStr;
-    bool ret = mgr->LoadComponentInfo(COMPONENT_PATHS, errStr);
+    bool ret = mgr->LoadComponentInfo(COMPONENT_PATHS, false, errStr);
     ASSERT_TRUE(ret);
 
     const OhosComponent *component;

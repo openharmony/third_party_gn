@@ -65,7 +65,8 @@ public:
     void LoadToolchain(const Value *product);
 
     bool LoadOhosComponents(const std::string &build_dir,
-                            const Value *enable, const Value *indep, const Value *product, Err *err);
+                            const Value *enable, const Value *indep, const Value *product, 
+                            bool special_parts_switch, Err *err);
 
     bool GetExternalDepsLabel(const Value &external_dep, std::string &label,
         const Label& current_toolchain, int &whole_status, Err *err) const;
@@ -99,7 +100,7 @@ private:
 public:
     const OhosComponent *matchComponentByLabel(const char *label);
 
-    bool LoadComponentInfo(const std::string &components_content, std::string &err_msg_out);
+    bool LoadComponentInfo(const std::string &components_content, bool special_parts_switch, std::string &err_msg_out);
 
     void LoadInnerApi(const std::string &component_name, const std::vector<base::Value> &innerapis);
 };
