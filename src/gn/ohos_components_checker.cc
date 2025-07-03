@@ -505,7 +505,7 @@ bool OhosComponentChecker::CheckInnerApiIncludesOverRange(const Target *target, 
     }
 
     const OhosComponent *component = target->ohos_component();
-    if (component == nullptr || (!component->isInnerApi(label) && !StartWith(label, "//third_party"))) {
+    if (component == nullptr || !component->isInnerApi(label) || StartWith(label, "//third_party")) {
         return true;
     }
 
