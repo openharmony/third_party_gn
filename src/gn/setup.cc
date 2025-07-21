@@ -443,6 +443,7 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
   // Load OpenHarmony system components definition file.
   const Value *support =
       dotfile_scope_.GetValue("ohos_components_support", true);
+  build_settings_.set_ohos_components_support(support && support->boolean_value());
   const Value *independent = build_settings_.build_args().GetArgOverride("ohos_indep_compiler_enable");
   const Value *product = build_settings_.build_args().GetArgOverride("product_name");
   const Value* special_parts_scan_switch = build_settings_.build_args().GetArgOverride("special_parts_scan_switch");
