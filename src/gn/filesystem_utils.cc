@@ -1069,14 +1069,10 @@ OutputFile GetSubBuildDirAsOutputFile(const BuildDirContext& context,
   OutputFile result = GetBuildDirAsOutputFile(context, type);
 
   if (source_dir.is_source_absolute()) {
-    std::string_view build_dir = context.build_settings->build_dir().value();
-    std::string_view source_dir_path = source_dir.value();
-    if (source_dir_path.substr(0, build_dir.size()) == build_dir) {
-+    // The source dir is source-absolute, so we trim off the two leading
-+    // slashes to append to the toolchain object directory.
-+    result.value().append(&source_dir.value()[2],
-+                          source_dir.value().size() - 2);
-    }
+    // The source dir is source-absolute, so we trim off the two leading
+    // slashes to append to the toolchain object directory.
+    result.value().append(&source_dir.value()[2],
+                          source_dir.value().size() - 2);
   } else {
     // System-absolute.
     AppendFixedAbsolutePathSuffix(context.build_settings, source_dir, &result);
