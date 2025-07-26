@@ -532,7 +532,7 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
     if (isOhosIndepCompilerEnable()) {
         label = component->getInnerApi(innerapi_name + tool_chain);
         if (label == EMPTY_INNERAPI) {
-          label = component->getInnerApi(innerapi_name);
+            label = component->getInnerApi(innerapi_name) + tool_chain;
         }
     } else {
         label = component->getInnerApi(innerapi_name) + tool_chain;

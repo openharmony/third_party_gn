@@ -377,7 +377,7 @@ bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *targ
     *err = Err(target->defined_from(), "Do not directly use header files of other components.",
         "The item " + label + " do not directly use header files : " + includes + " of other components." +
         "\n"
-        "Please use 'external_deps/public_external_deps' dependent module.");
+        "Please use 'external_deps' dependent module.");
     return false;
 }
 
@@ -408,7 +408,7 @@ bool OhosComponentChecker::InterceptTargetAbsoluteDepsOther(const Item *item, co
     *err = Err(item->defined_from(), "Not allow use absolute dependent other component.",
         "The item " + label + " not allow use absolute dependent other component : " + deps +
         "\n"
-        "Please use 'external_deps/public_external_deps'.");
+        "Please use 'external_deps'.");
     return false;
 }
 
