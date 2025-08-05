@@ -191,7 +191,6 @@ static void LoadModifyList()
             iter->second(kv.second);
         }
     }
-    return;
 }
 
 static void LoadPreciseConfig()
@@ -219,7 +218,6 @@ static void LoadPreciseConfig()
             iter->second(kv.second);
         }
     }
-    return;
 }
 
 PreciseManager::PreciseManager(const std::string& outDir, const std::string& preciseConfig)
@@ -276,16 +274,16 @@ bool PreciseManager::IsContainModifiedFiles(const std::string& file, bool isHFil
 {
     if (isHFile) {
         for (const std::string& h : modifyHFileList_) {
-           if (base::starts_with(h, file)) {
-               return true;
-           }
+            if (base::starts_with(h, file)) {
+                return true;
+            }
         }
         return false;
     } else {
         for (const std::string& c : modifyCFileList_) {
-           if (c == file) {
-               return true;
-           }
+            if (c == file) {
+                return true;
+            }
         }
         return false;
     }
@@ -422,7 +420,6 @@ void PreciseManager::WriteFile(const std::string& path, const std::string& info)
     fileFd.open(outFile, std::ios::out);
     fileFd << info;
     fileFd.close();
-    return;
 }
 
 bool PreciseManager::FilterType(const Item* item)
@@ -433,10 +430,10 @@ bool PreciseManager::FilterType(const Item* item)
 
     std::string name = item->label().GetUserVisibleName(false);
     if (base::ends_with(name, "__check")
-       || base::ends_with(name, "__collect")
-       || base::ends_with(name, "__notice")
-       || base::ends_with(name, "_info_install_info")
-       || base::ends_with(name, "_resource_copy")) {
+        || base::ends_with(name, "__collect")
+        || base::ends_with(name, "__notice")
+        || base::ends_with(name, "_info_install_info")
+        || base::ends_with(name, "_resource_copy")) {
         return false;
     }
 
@@ -520,13 +517,13 @@ bool PreciseManager::CheckModuleInGn(const std::string& label)
     for (const std::string& gn : modifyGnFileList_) {
         size_t pos = label.find(":");
         if (pos == std::string::npos) {
-           return false;
+            return false;
         }
         std::string labelPrefix = label.substr(0, pos);
 
         size_t posGn = gn.find("BUILD.gn");
         if (posGn == std::string::npos) {
-           return false;
+            return false;
         }
         std::string filePrefix = gn.substr(0, posGn - 1);
         if (labelPrefix == filePrefix) {
