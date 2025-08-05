@@ -11,10 +11,13 @@
 #include "base/values.h"
 #include "gn/err.h"
 #include "gn/filesystem_utils.h"
+#include "gn/graph/include/module.h"
+#include "gn/graph/include/node.h"
 #include "gn/item.h"
 #include "gn/label.h"
 #include "gn/ohos_components.h"
 #include "gn/ohos_components_checker.h"
+#include "gn/precise/precise.h"
 #include "gn/scope.h"
 #include "gn/value.h"
 #include "gn/variables.h"
@@ -106,6 +109,23 @@ bool Visibility::CheckItemVisibility(const Item *from, const Item *to, bool is_e
     }
     const OhosComponent *from_component = from->ohos_component();
     const OhosComponent *to_component = to->ohos_component();
+
+    PreciseManager* precisehManager = PreciseManager::GetInstance();
+    if (precisehManager != nullptr) {
+        Node *fromNode = precisehManager->GetModule(from_label);
+        if (!fromNode) {
+          fromNode = new Module(from_label, from_label, from);
+        }
+        Node *toNode = precisehManager->GetModule(to_label);
+        if (!toNode) {
+          toNode = new Module(to_label, to_label, to);
+        }
+        fromNode->AddTo(toNode);
+        toNode->AddFrom(fromNode);
+        precisehManager->AddModule(from_label, fromNode);
+        precisehManager->AddModule(to_label, toNode);
+    }
+
     if ((from_component == nullptr) || (to_component == nullptr)) {
         return true;
     }

@@ -28,6 +28,7 @@
 #include "gn/ohos_components_checker.h"
 #include "gn/parse_tree.h"
 #include "gn/parser.h"
+#include "gn/precise/precise.h"
 #include "gn/source_dir.h"
 #include "gn/source_file.h"
 #include "gn/standard_out.h"
@@ -479,6 +480,12 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
   if (independent) {
       ohos_components_.LoadOhosComponentsMapping(build_dir, support, independent);
   }
+
+  const Value* preciseEnable = build_settings_.build_args().GetArgOverride("ohos_module_precise_build");
+  if (preciseEnable && preciseEnable->boolean_value()) {
+    const Value* preciseConfig = build_settings_.build_args().GetArgOverride("ohos_precise_config");
+    PreciseManager::Init(build_dir, preciseConfig);
+  }
   return true;
 }
 
@@ -606,6 +613,11 @@ bool Setup::RunPostMessageLoop(const base::CommandLine& cmdline) {
       result.PrintToStdout();
       return false;
     }
+  }
+
+  PreciseManager* preciseManager = PreciseManager::GetInstance();
+  if (preciseManager != nullptr) {
+      preciseManager->GeneratPreciseTargets();
   }
   return true;
 }
