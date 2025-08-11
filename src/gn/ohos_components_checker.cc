@@ -29,6 +29,7 @@ static const std::string WHITELIST_PATH = "component_compilation_whitelist.json"
 static const int BASE_BINARY = 1;
 static std::vector<std::string> all_deps_config_;
 static std::map<std::string, std::vector<std::string>> public_deps_;
+static std::map<std::string, std::vector<std::string>> lib_dirs_;
 static std::vector<std::string> includes_over_range_;
 static std::map<std::string, std::vector<std::string>> innerapi_public_deps_inner_;
 static std::vector<std::string> innerapi_not_lib_;
@@ -113,6 +114,15 @@ static void LoadPublicDepsWhitelist(const base::Value &value)
     }
 }
 
+static void LoadLibDirsWhitelist(const base::Value &value)
+{
+    for (auto info : value.DictItems()) {
+        for (const base::Value &value_tmp : info.second.GetList()) {
+            lib_dirs_[info.first].push_back(value_tmp.GetString());
+        }
+    }
+}
+
 static void LoadInnerApiNotLibWhitelist(const base::Value &list)
 {
     for (const base::Value &value : list.GetList()) {
@@ -179,6 +189,7 @@ static std::map<std::string, std::function<void(const base::Value &value)>> whit
     { "innerapi_not_declare", LoadInnerApiNotDeclareWhitelist },
     { "innerapi_public_deps_inner", LoadInnerApiPublicDepsInnerWhitelist },
     { "public_deps", LoadPublicDepsWhitelist },
+    { "lib_dirs", LoadLibDirsWhitelist},
     { "includes_absolute_deps_other", LoadIncludesAbsoluteDepsOtherWhitelist },
     { "target_absolute_deps_other", LoadAbsoluteDepsOtherWhitelist },
     { "import_other", LoadImportOtherWhitelist },
@@ -291,7 +302,36 @@ bool OhosComponentChecker::InterceptPublicDeps(const Target *target, const std::
         *err = Err(target->defined_from(), "public_deps/public_external_deps not allowed.",
             "The item " + label + " not allow the use of public_deps/public_external_deps dependent module : " + deps);
          return false;
-     }
+    }
+
+bool OhosComponentChecker::InterceptLibDir(const Target *target, const std::string &label,
+    const std::string &dir, Err *err) const
+{
+    if (!IsIntercept(ruleSwitch_, LIB_DIRS_BINARY)) {
+        return true;
+    }
+
+    if (auto res = fuzzy_match_.find("lib_dirs"); res != fuzzy_match_.end()) {
+        std::string lib_dirs(dir);
+        for (auto res_second : res->second) {
+            if (StartWith(Trim(lib_dirs), res_second)) {
+                return true;
+            }
+        }
+    }
+
+    if (auto res = lib_dirs.find(label); res != lib_dirs.end()) {
+        std::string lib_dirs(dirs);
+        auto res_second = std::find(res->second.begin(), res->second.end(), Trim(lib_dirs));
+        if (res_second != res->second.end()) {
+            return true;
+        }
+    }
+
+    *err = Err(target->defined_from(), "lib_dirs not allowed.",
+        "The item" + label + " do not use lib_dirs : " + dir);
+    return false;
+}
 
 bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::string &label, Err *err) const
 {
@@ -573,6 +613,25 @@ bool OhosComponentChecker::CheckPublicDeps(const Target *target, const std::stri
             component == nullptr ? "" : component->name(), label, deps);
         return true;
     }
+
+bool OhosComponentChecker::CheckLibDir(const Target *target, const std::string &label,
+    const std::string &dir, Err *err) const
+{
+    if (checkType_ <= CheckType::NONE || target == nullptr || (ignoreTest_ && target->testonly())) {
+        return true;
+    }
+
+    const OhosComponent *component = target->ohos_component();
+    if (component == nullptr) {
+        return true;
+    }
+
+    if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
+        return InterceptLibDir(target, label, dir, err);
+    }
+    GenerateScanList("lib_dirs.list", component->subsystem(), component->name(), label, dirs);
+    return true;
+}
 
 bool OhosComponentChecker::CheckInnerApiNotLib(const Item *item, const OhosComponent *component,
     const std::string &label, const std::string &deps, Err *err) const

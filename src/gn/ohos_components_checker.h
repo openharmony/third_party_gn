@@ -36,6 +36,7 @@ public:
         IMPORT_OTHER_BINARY,
         INNERAPI_VISIBILITY_DENIED,
         PUBLIC_DEPS_BINARY,
+        LIB_DIRS_BINARY,
         ALL
     };
 
@@ -54,6 +55,7 @@ public:
         Err *err) const;
     bool CheckPublicDeps(const Target *target, const std::string &label, const std::string &deps,
         Err *err) const;
+    bool CheckLibDir(const Target *target, const std::string &label, const std::string &dir, Err *err) const;
     bool CheckInnerApiNotLib(const Item *item, const OhosComponent *component, const std::string &label,
         const std::string &deps, Err *err) const;
     bool CheckInnerApiNotDeclare(const Item *item, const OhosComponent *component, const std::string &label,
@@ -85,6 +87,7 @@ private:
         Err *err) const;
     bool InterceptPublicDeps(const Target *target, const std::string &label, const std::string &deps,
         Err *err) const;
+    bool InterceptLibDir(const Target *target, const std::string &label, const std::string &dir, Err *err) const;
     bool InterceptInnerApiNotLib(const Item *item, const std::string &label, Err *err) const;
     bool InterceptDepsNotLib(const Item *item, const std::string &label, const std::string &deps, Err *err) const;
     bool InterceptInnerApiNotDeclare(const Item *item, const std::string &label, Err *err) const;
