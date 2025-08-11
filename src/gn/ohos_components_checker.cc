@@ -189,7 +189,7 @@ static std::map<std::string, std::function<void(const base::Value &value)>> whit
     { "innerapi_not_declare", LoadInnerApiNotDeclareWhitelist },
     { "innerapi_public_deps_inner", LoadInnerApiPublicDepsInnerWhitelist },
     { "public_deps", LoadPublicDepsWhitelist },
-    { "lib_dirs", LoadLibDirsWhitelist},
+    { "lib_dirs", LoadLibDirsWhitelist },
     { "includes_absolute_deps_other", LoadIncludesAbsoluteDepsOtherWhitelist },
     { "target_absolute_deps_other", LoadAbsoluteDepsOtherWhitelist },
     { "import_other", LoadImportOtherWhitelist },
@@ -320,8 +320,8 @@ bool OhosComponentChecker::InterceptLibDir(const Target *target, const std::stri
         }
     }
 
-    if (auto res = lib_dirs.find(label); res != lib_dirs.end()) {
-        std::string lib_dirs(dirs);
+    if (auto res = lib_dirs_.find(label); res != lib_dirs_.end()) {
+        std::string lib_dirs(dir);
         auto res_second = std::find(res->second.begin(), res->second.end(), Trim(lib_dirs));
         if (res_second != res->second.end()) {
             return true;
@@ -629,7 +629,7 @@ bool OhosComponentChecker::CheckLibDir(const Target *target, const std::string &
     if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
         return InterceptLibDir(target, label, dir, err);
     }
-    GenerateScanList("lib_dirs.list", component->subsystem(), component->name(), label, dirs);
+    GenerateScanList("lib_dirs.list", component->subsystem(), component->name(), label, dir);
     return true;
 }
 
