@@ -227,7 +227,7 @@ static std::string GetConfigInfo(const Target *target, const UniqueVector<LabelC
     std::string info = "[{";
     bool first = true;
     for (const auto &config : configs) {
-        const std::vector<SourceDir>lib_dirs = config.ptr->own_values().lib_dirs();
+        const std::vector<SourceDir> lib_dirs = config.ptr->own_values().lib_dirs();
         if (!TraverLibDirs(target, checker, lib_dirs, err)) {
             return "";
         }
