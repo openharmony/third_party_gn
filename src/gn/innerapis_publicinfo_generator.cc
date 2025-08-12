@@ -185,6 +185,21 @@ static std::string GetFlagsInfo(const Config *config)
     return info;
 }
 
+static bool TraverLibDirs(const Target *target, const OhosComponentChecker *checker,
+    const std::vector<SourceDir> &dirs, Err *err)
+{
+    if (checker == nullptr) {
+        return true;
+    }
+    std::string label = target->label().GetUserVisibleName(false);
+    for (const SourceDir &dir : dirs) {
+        if (!checker->CheckLibDir(target, label, dir.value(), err)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static std::string GetIncludeDirsInfo(const Target *target, const Config *config,
     const OhosComponentChecker *checker, Err *err, bool isPublic)
 {
@@ -212,6 +227,10 @@ static std::string GetConfigInfo(const Target *target, const UniqueVector<LabelC
     std::string info = "[{";
     bool first = true;
     for (const auto &config : configs) {
+        const std::vector<SourceDir> lib_dirs = config.ptr->own_values().lib_dirs();
+        if (!TraverLibDirs(target, checker, lib_dirs, err)) {
+            return "";
+        }
         std::string label = config.label.GetUserVisibleName(false);
         if (!first) {
             info += ", {";
@@ -407,7 +426,10 @@ void InnerApiPublicInfoGenerator::DoGeneratedInnerapiPublicInfo(const Target *ta
     const OhosComponent *component = target->ohos_component();
     std::string info = GetBaseInfo(target, label, module, component);
     info += GetPublicInfo(target, label, checker, err);
-
+    const std::vector<SourceDir> &lib_dirs = target->config_values().lib_dirs();
+    if (!TraverLibDirs(target, checker, lib_dirs, err)) {
+        return;
+    }
     if (!TraverIncludeDirs(target, checker, label, err)) {
         return;
     }
