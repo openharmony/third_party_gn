@@ -39,6 +39,8 @@ static std::map<std::string, std::vector<std::string>> target_absolute_deps_othe
 static std::map<std::string, std::vector<std::string>> import_other_;
 static std::map<std::string, std::vector<std::string>> deps_not_lib_;
 static std::map<std::string, std::vector<std::string>> fuzzy_match_;
+static std::map<std::string, std::vector<std::string>> deps_component_not_declare_;
+static std::map<std::string, std::vector<std::string>> external_deps_inner_;
 
 OhosComponentChecker *OhosComponentChecker::instance_ = nullptr;
 
@@ -182,6 +184,24 @@ static void LoadFuzzyMatchWhitelist(const base::Value &value)
     }
 }
 
+static void LoadDepsComponentNotDeclareWhitelist(const base::Value &value)
+{
+    for (auto info : value.DictItems()) {
+        for (const base::Value &value_tmp : info.second.GetList()) {
+            deps_component_not_declare_[info.first].push_back(value_tmp.GetString());
+        }
+    }
+}
+
+static void LoadExternalDepsInnerWhiteList(const base::Value &value)
+{
+    for (auto info : value.DictItems()) {
+        for (const base::Value &value_tmp : info.second.GetList()) {
+            external_deps_inner_[info.first].push_back(value_tmp.GetString());
+        }
+    }
+}
+
 static std::map<std::string, std::function<void(const base::Value &value)>> whitelist_map_ = {
     { "all_dependent_configs", LoadAllDepsConfigWhitelist },
     { "includes_over_range", LoadIncludesOverRangeWhitelist },
@@ -194,6 +214,8 @@ static std::map<std::string, std::function<void(const base::Value &value)>> whit
     { "target_absolute_deps_other", LoadAbsoluteDepsOtherWhitelist },
     { "import_other", LoadImportOtherWhitelist },
     { "deps_not_lib", LoadDepsNotLibWhitelist },
+    { "deps_component_not_declare", LoadDepsComponentNotDeclareWhitelist },
+    { "external_deps_inner_target", LoadExternalDepsInnerWhiteList },
     { "fuzzy_match", LoadFuzzyMatchWhitelist }
 };
 
@@ -495,6 +517,57 @@ bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode *function
     return false;
 }
 
+bool OhosComponentChecker::InterceptDepsComponentNotDeclare(const Item *item, const std::string &label,
+    const std::string &from_name, const std::string &to_name, const std::string &path, Err *err) const
+{
+    if (!IsIntercept(ruleSwitch_, DEPS_COMPONENT_NOT_DECLARE)) {
+        return true;
+    }
+
+    if (auto res = fuzzy_match_.find("deps_component_not_declare"); res != fuzzy_match_.end()) {
+        auto res_second = std::find(res->second.begin(), res->second.end(), to_name);
+        if (res_second != res->second.end()) {
+            return true;
+        }
+    }
+
+    if (auto res = deps_component_not_declare_.find(from_name); res != deps_component_not_declare_.end()) {
+        auto res_second = std::find(res->second.begin(), res->second.end(), to_name);
+        if (res_second != res->second.end()) {
+            return true;
+        }
+    }
+
+    *err = Err(item->defined_from(), "The deps component is not declared in bundle.json.",
+               "The item " + label + " depends on component '" + to_name + "'" +
+               "\n"
+               "Please add '" + to_name + "' in 'components' of " + path + "/bundle.json.");
+
+    return false;
+}
+
+bool OhosComponentChecker::InterceptExternalDepsInner(const Item *item, const std::string &from_label,
+    const std::string &to_label, Err *err) const
+{
+    if (!IsIntercept(ruleSwitch_, EXTERNAL_DEPS_INNER)) {
+        return true;
+    }
+
+    if (auto res = external_deps_inner_.find(from_label); res != external_deps_inner_.end()) {
+        auto res_second = std::find(res->second.begin(), res->second.end(), to_label);
+        if (res_second != res->second.end()) {
+            return true;
+        }
+    }
+
+    *err = Err(item->defined_from(), "Cannot use 'external_deps' dependency inner module.",
+               "The item " + from_label + " cannot use 'external_deps' dependency inner module " + to_label +
+               "\n"
+               "Please use 'deps' dependency inner module.");
+
+    return false;
+}
+
 OhosComponentChecker::OhosComponentChecker(const std::string &build_dir, int checkType, unsigned int ruleSwitch)
 {
     checkType_ = checkType;
@@ -789,5 +862,63 @@ bool OhosComponentChecker::CheckImportOther(const FunctionCallNode *function, co
         return InterceptImportOther(function, label, deps, err);
     }
     GenerateScanList("import_other.list", component->subsystem(), component->name(), label, deps);
+    return true;
+}
+
+bool OhosComponentChecker::CheckDepsComponentNotDeclare(const Item *from, const Item *to, const std::string &label,
+    const std::string &deps, bool is_external_deps, Err *err) const
+{
+    if (checkType_ <= CheckType::NONE || from == nullptr || to == nullptr || (ignoreTest_ && from->testonly()) ||
+        from->AsTarget() == nullptr || to->AsTarget() == nullptr) {
+        return true;
+    }
+
+    if (!is_external_deps) {
+        return true;
+    }
+
+    const OhosComponent *from_component = from->ohos_component();
+    const OhosComponent *to_component = to->ohos_component();
+    if (from_component == nullptr || to_component == nullptr) {
+        return true;
+    }
+
+    std::string from_name = from_component->name();
+    std::string from_label = from->label().GetUserVisibleName(false);
+    std::string to_name = to_component->overrided_name();
+    std::string to_label = to->label().GetUserVisibleName(false);
+    if (from_component->isComponentDeclared(to_name)) {
+        return true;
+    }
+
+    if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
+        return InterceptDepsComponentNotDeclare(from, from_label, from_name, to_name, from_component->path(), err);
+    }
+
+    GenerateScanList("deps_component_not_declare.list",
+                     from_component->subsystem(), from_name, from_name, to_name);
+
+    return true;
+}
+
+bool OhosComponentChecker::CheckExternalDepsInner(const Item *item, const OhosComponent *component,
+    const std::string &label, const std::string &deps, bool is_external_deps, Err *err) const
+{
+    if (checkType_ <= CheckType::NONE || item == nullptr || item->AsTarget() == nullptr ||
+        component == nullptr || (ignoreTest_ && item->testonly())) {
+        return true;
+    }
+
+    if (!is_external_deps) {
+        return true;
+    }
+
+    if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
+        return InterceptExternalDepsInner(item, label, deps, err);
+    }
+
+    GenerateScanList("external_deps_inner_target.list",
+                     component->subsystem(), component->name(), label, deps);
+
     return true;
 }

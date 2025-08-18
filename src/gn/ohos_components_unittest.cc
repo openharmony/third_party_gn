@@ -41,10 +41,11 @@ static const std::string COMPONENT_PATHS = "{"
         "}";
 
 TEST(OhosComponent, ComponentInnerApi) {
-    OhosComponent com("foo", "samples", "components/foo", {"components/foo"}, false);
+    OhosComponent com("foo", "samples", "components/foo", "foo_overrided", {"components/foo"}, false);
     EXPECT_EQ("foo", com.name());
     EXPECT_EQ("samples", com.subsystem());
     EXPECT_EQ("//components/foo", com.path());
+    EXPECT_EQ("foo_overrided", com.overrided_name());
 
     // Add two innerapis
     const std::string fooLabel = "//components/foo/interfaces/innerapis/libfoo:libfoo";

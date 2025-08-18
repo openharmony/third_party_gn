@@ -44,10 +44,11 @@ static std::string GetPath(const char *path)
     return process_path;
 }
 
-OhosComponent::OhosComponent(const char *name, const char *subsystem, const char *path,
+OhosComponent::OhosComponent(const char *name, const char *subsystem, const char *path, const char *overrided_name,
     const std::vector<std::string> &modulePath, bool special_parts_switch)
 {
     name_ = std::string(name);
+    overrided_name_ = std::string(overrided_name);
     subsystem_ = std::string(subsystem);
     path_ = GetPath(path);
     special_parts_switch_ = special_parts_switch;
@@ -108,6 +109,22 @@ const std::vector<std::string> OhosComponent::getInnerApiVisibility(const std::s
         return res->second;
     }
     return {};
+}
+
+void OhosComponent::addDepsComponent(const std::vector<base::Value> &list)
+{
+    for (const base::Value &component : list) {
+        deps_components_.insert(component.GetString());
+    }
+}
+
+bool OhosComponent::isComponentDeclared(const std::string &component) const
+{
+    if (auto res = deps_components_.find(component); res != deps_components_.end()) {
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -184,14 +201,26 @@ bool OhosComponentsImpl::LoadComponentInfo(const std::string &components_content
             module_path = GetModulePath(path-> GetString(), components_path_list);
         }
 
+        std::string overrided_name = com.first;
+        for (const auto& pair : override_map_) {
+            if (pair.second == com.first) {
+                overrided_name = pair.first;
+                break;
+            }
+        }
+
         components_[com.first] =
             new OhosComponent(com.first.c_str(), subsystem->GetString().c_str(), path->GetString().c_str(),
-            module_path, special_parts_switch);
+                              overrided_name.c_str(), module_path, special_parts_switch);
         const base::Value *innerapis = com.second.FindKey("innerapis");
-        if (!innerapis) {
-            continue;
+        if (innerapis) {
+            LoadInnerApi(com.first, innerapis->GetList());
         }
-        LoadInnerApi(com.first, innerapis->GetList());
+
+        const base::Value *deps_components = com.second.FindKey("deps_components");
+        if (deps_components) {
+            LoadDepsComponents(com.first, deps_components->GetList());
+        }
     }
     setupComponentsTree();
     return true;
@@ -358,6 +387,16 @@ void OhosComponentsImpl::LoadInnerApi(const std::string &component_name, const s
         }
         component->addInnerApiVisibility(name->GetString(), visibility->GetList());
     }
+}
+
+void OhosComponentsImpl::LoadDepsComponents(const std::string &component_name,
+                                            const std::vector<base::Value> &deps_components) {
+    OhosComponent *component = (OhosComponent *)GetComponentByName(component_name);
+    if (!component) {
+        return;
+    }
+
+    component->addDepsComponent(deps_components);
 }
 
 void OhosComponentsImpl::LoadOverrideMap(const std::string &override_map)
