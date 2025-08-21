@@ -37,6 +37,8 @@ public:
         INNERAPI_VISIBILITY_DENIED,
         PUBLIC_DEPS_BINARY,
         LIB_DIRS_BINARY,
+        DEPS_COMPONENT_NOT_DECLARE,
+        EXTERNAL_DEPS_INNER,
         ALL
     };
 
@@ -68,6 +70,10 @@ public:
         const std::string &deps, bool is_external_deps, Err *err) const;
     bool CheckImportOther(const FunctionCallNode *function, const BuildSettings *build_settings,
         const std::string &label, const std::string &deps, Err *err) const;
+    bool CheckExternalDepsInner(const Item *item, const OhosComponent *component, const std::string &label,
+                                const std::string &deps, bool is_external_deps, Err *err) const;
+    bool CheckDepsComponentNotDeclare(const Item *from, const Item *to, const std::string &label,
+                                const std::string &deps, bool is_external_deps, Err *err) const;
 
     static OhosComponentChecker *getInstance()
     {
@@ -99,6 +105,10 @@ private:
         Err *err) const;
     bool InterceptImportOther(const FunctionCallNode* function, const std::string &label, const std::string &deps,
         Err *err) const;
+    bool InterceptDepsComponentNotDeclare(const Item *item, const std::string &label, const std::string &from_name,
+                                          const std::string &to_name, const std::string &path, Err *err) const;
+    bool InterceptExternalDepsInner(const Item *item, const std::string &from_label, const std::string &to_label,
+                                    Err *err) const;
     void GenerateScanList(const std::string &path, const std::string &subsystem, const std::string &component,
         const std::string &label, const std::string &deps) const;
     OhosComponentChecker() {}

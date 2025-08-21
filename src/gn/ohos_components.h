@@ -7,6 +7,7 @@
 
 #include <map>
 #include <mutex>
+#include <set>
 
 #include "base/files/file_path.h"
 #include "base/values.h"
@@ -16,12 +17,16 @@
 class OhosComponent {
 public:
     OhosComponent();
-    OhosComponent(const char *name, const char *subsystem, const char *path,
+    OhosComponent(const char *name, const char *subsystem, const char *path, const char *overrided_name,
         const std::vector<std::string> &modulePath, bool special_parts_switch);
 
     const std::string &name() const
     {
         return name_;
+    }
+    const std::string &overrided_name() const
+    {
+        return overrided_name_;
     }
     const std::string &subsystem() const
     {
@@ -39,6 +44,7 @@ public:
     {
         return special_parts_switch_;
     }
+
     void addInnerApi(const std::string &name, const std::string &label);
 
     const std::string &getInnerApi(const std::string &innerapi) const;
@@ -49,10 +55,15 @@ public:
 
     bool isInnerApi(const std::string &label) const;
 
+    void addDepsComponent(const std::vector<base::Value> &list);
+
+    bool isComponentDeclared(const std::string &component) const;
+
 private:
     std::string name_;
     std::string subsystem_;
     std::string path_;
+    std::string overrided_name_;
     std::vector<std::string> module_path_;
     bool special_parts_switch_ = false;
 
@@ -64,6 +75,9 @@ private:
 
     // InnerApi lable to visibility map
     std::map<std::string, std::vector<std::string>> innerapi_visibility_;
+
+    // External deps components set
+    std::set<std::string> deps_components_;
 
     OhosComponent &operator = (const OhosComponent &) = delete;
 };

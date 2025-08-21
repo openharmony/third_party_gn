@@ -103,6 +103,8 @@ public:
     bool LoadComponentInfo(const std::string &components_content, bool special_parts_switch, std::string &err_msg_out);
 
     void LoadInnerApi(const std::string &component_name, const std::vector<base::Value> &innerapis);
+
+    void LoadDepsComponents(const std::string &component_name, const std::vector<base::Value> &deps_components);
 };
 
 #endif // TOOLS_GN_OHOS_COMPONENTS_MGR_H_
