@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 
@@ -22,8 +21,6 @@
 #include "gn/substitution_writer.h"
 #include "gn/target.h"
 #include "gn/value.h"
-
-namespace fs = std::filesystem;
 
 PreciseManager* PreciseManager::instance_ = nullptr;
 static int hFileDepth_ = INT_MAX;
@@ -403,19 +400,13 @@ bool PreciseManager::CheckAllDepConfigs(const Item* item)
     return false;
 }
 
-void PreciseManager::EnsurePathExists(const std::string& filePath)
-{
-    fs::path path(filePath);
-    auto dirPath = path.parent_path();
-    if (!dirPath.empty() && !fs::exists(dirPath)) {
-        fs::create_directories(dirPath);
-    }
-}
-
 void PreciseManager::WriteFile(const std::string& path, const std::string& info)
 {
     std::string outFile = outDir_ + "/" + path;
-    EnsurePathExists(outFile);
+    base::FilePath dirPath = base::FilePath(outDir_);
+    if (!base::PathExists(dirPath)) {
+        base::CreateDirectory(dirPath);
+    }
     std::ofstream fileFd;
     fileFd.open(outFile, std::ios::out);
     fileFd << info;
