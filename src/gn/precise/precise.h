@@ -69,7 +69,7 @@ private:
     bool IsFirstRecord(const std::vector<std::string>& result, const std::string& name);
     bool IsTargetTypeMatch(const Item* item);
     bool IsTestOnlyMatch(const Item* item);
-    void PreciseSearch(const Node* node, std::vector<std::string>& result, std::vector<std::string>& log,
+    void PreciseSearch(const Node* node, std::vector<std::string>& result, std::vector<Module*>& module_list, std::vector<std::string>& log,
         bool forGn, int depth, int maxDepth);
     void WriteFile(const std::string& path, const std::string& info);
     void WritePreciseTargets(const std::vector<std::string>& result, const std::vector<std::string>& log);

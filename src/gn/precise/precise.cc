@@ -40,6 +40,8 @@ static std::vector<std::string> modifyGnFileList_;
 static std::vector<std::string> modifyGnModuleList_;
 static std::vector<std::string> ignoreList_;
 static std::vector<std::string> maxRangeList_;
+static std::unordered_set<std::string> rootTargets_;
+static std::unordered_map<std::string, bool> filter_cache;
 
 static bool ReadFile(base::FilePath path, std::string& content)
 {
@@ -142,6 +144,13 @@ static void LoadTargetTypeList(const base::Value& list)
     }
 }
 
+static void LoadRootTarget(const base::Value& list)
+{
+    for (const base::Value& value : list.GetList()) {
+        rootTargets_.insert(value.GetString());
+    }
+}
+
 static std::map<std::string, std::function<void(const base::Value& value)>> modifyMap_ = {
     { "h_file", LoadHFileList },
     { "c_file", LoadCFileList },
@@ -161,6 +170,7 @@ static std::map<std::string, std::function<void(const base::Value& value)>> conf
     { "modify_files_path", LoadModifyFilesPath },
     { "precise_result_path", LoadPreciseResultPath },
     { "precise_log_path", LoadPreciseLogPath },
+    { "root_target", LoadRootTarget }
 };
 
 static void LoadModifyList()
@@ -469,7 +479,7 @@ bool PreciseManager::IsFirstRecord(const std::vector<std::string>& result, const
     return false;
 }
 
-void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& result, std::vector<std::string>& log,
+void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& result, std::vector<Module*>& module_list, std::vector<std::string>& log,
     bool forGn, int depth, int maxDepth)
 {
     Module* module = (Module* )node;
@@ -491,6 +501,7 @@ void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& r
         && !IsIgnore(name) && IsInMaxRange(name)) {
         log.push_back("OK:" + name);
         result.push_back(name);
+        module_list.push_back(module);
         return;
     }
 
@@ -499,7 +510,7 @@ void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& r
         const Item* itemParent = moduleParent->GetItem();
         std::string nameParent = itemParent->label().GetUserVisibleName(false);
         log.push_back("Check Parent:" + nameParent + "->" + name);
-        PreciseSearch(parent, result, log, forGn, depth + 1, maxDepth);
+        PreciseSearch(parent, result, module_list, log, forGn, depth + 1, maxDepth);
     }
 }
 
@@ -553,10 +564,54 @@ void PreciseManager::WritePreciseTargets(const std::vector<std::string>& result,
     WriteFile(preciseResultPath_, resultInfo);
 }
 
+bool CheckModuleRootTargets(Module* module, std::string origin_label, std::vector<std::string> cache_list)
+{
+    if (module == nullptr) {
+        cache_list.clear();
+        return false;
+    }
+    
+    std::string label = module->GetItem()->label().GetUserVisibleName(false);
+    if (rootTargets_.find(label) != rootTargets_.end() || filter_cache[label]) {
+        if (!cache_list.empty()) {
+            for (auto &label : cache_list) {
+                filter_cache[label] = true;
+            }
+        }
+        return true;
+    }
+    cache_list.push_back(label);
+    std::vector<Node*> from_list = module->GetFromList();
+    if (!from_list.empty()) {
+        for (Node* parent : module->GetFromList()) {
+            Module* moduleParent = (Module* )parent;
+            std::string parent_label = moduleParent->GetItem()->label().GetUserVisibleName(false);
+            return CheckModuleRootTargets(moduleParent, parent_label, cache_list);
+        }
+    }
+    cache_list.clear();
+    return false;
+}
+
+void FilterWithRootTargets(std::vector<std::string>& result, std::vector<Module*>& module_list)
+{
+    for (int i = result.size() - 1; i >= 0; --i)
+    {   
+        Module* module = module_list[i];
+        std::string label = module->GetItem()->label().GetUserVisibleName(false);
+        if (!CheckModuleRootTargets(module, label, {})) {
+            std::cout << "Delete target not from root targets:" << result[i] << "(index:" << i << ")" << std::endl;
+            result.erase(result.begin() + i);
+            module_list.erase(module_list.begin() + i);
+        }
+    }
+}
+
 void PreciseManager::GeneratPreciseTargets()
 {
-    std::cout << "GeneratPreciseTargets Begain." << std::endl;
+    std::cout << "GeneratPreciseTargets Begin." << std::endl;
     std::vector<std::string> result;
+    std::vector<Module*> module_list;
     std::vector<std::string> log;
     log.push_back("Init Precise depth:" + std::to_string(hFileDepth_) + " " + std::to_string(cFileDepth_)
         + " " + std::to_string(gnFileDepth_) + " " + std::to_string(gnModuleDepth_));
@@ -571,18 +626,23 @@ void PreciseManager::GeneratPreciseTargets()
 
         if (CheckSourceInTarget(item)) {
             log.push_back("Hit C:");
-            PreciseSearch(pair.second, result, log, false, 0, cFileDepth_);
+            PreciseSearch(pair.second, result, module_list, log, false, 0, cFileDepth_);
         } else if (CheckIncludeInTarget(item) || CheckPrivateConfigs(item)
             || CheckPublicConfigs(item) || CheckAllDepConfigs(item)) {
             log.push_back("Hit H:");
-            PreciseSearch(pair.second, result, log, false, 0, hFileDepth_);
+            PreciseSearch(pair.second, result, module_list, log, false, 0, hFileDepth_);
         } else if (CheckModuleInGn(label)) {
             log.push_back("Hit GN:");
-            PreciseSearch(pair.second, result, log, true, 0, gnFileDepth_);
+            PreciseSearch(pair.second, result, module_list, log, true, 0, gnFileDepth_);
         } else if (CheckModuleMatch(label)) {
             log.push_back("Hit Module:");
-            PreciseSearch(pair.second, result, log, true, 0, gnModuleDepth_);
+            PreciseSearch(pair.second, result, module_list, log, true, 0, gnModuleDepth_);
         }
+    }
+    if (!rootTargets_.empty()){
+        std::cout << "Module target count:" << result.size() << std::endl;
+        FilterWithRootTargets(result, module_list);
+        std::cout << "Module target count filtered by root targets:" << result.size() << std::endl;
     }
     WritePreciseTargets(result, log);
 }
