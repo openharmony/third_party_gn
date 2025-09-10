@@ -15,6 +15,9 @@
 #include "gn/switches.h"
 #include "gn/test_with_scheduler.h"
 #include "util/test/test.h"
+#include "gn/build_settings.h"
+#include "gn/ohos_components.h"
+#include "gn/ohos_components_impl.h"
 
 using NinjaOutputsWriterTest = TestWithScheduler;
 using NinjaOutputsMap = NinjaOutputsWriter::MapType;
@@ -58,10 +61,12 @@ TEST_F(NinjaOutputsWriterTest, OutputsFile) {
 
   const char kDotfileContents[] = R"(
 buildconfig = "//BUILDCONFIG.gn"
+ohos_components_support = false
 )";
 
   const char kBuildConfigContents[] = R"(
 set_default_toolchain("//toolchain:default")
+ohos_components_support = false
 )";
 
   const char kToolchainBuildContents[] = R"##(
@@ -155,5 +160,5 @@ group("zoo") {
   ]
 })##";
 
-  EXPECT_EQ(generated, expected);
+  EXPECT_EQ(generated, expected) << generated << "\n" << expected;
 }

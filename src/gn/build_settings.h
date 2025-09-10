@@ -155,6 +155,7 @@ class BuildSettings {
 
   bool isOhosIndepCompilerEnable() const;
 
+  void set_ohos_components_support(bool enabled) { ohos_components_support_ = enabled; }
 private:
   Label root_target_label_;
   std::vector<LabelPattern> root_patterns_;
@@ -181,6 +182,7 @@ private:
   std::unique_ptr<SourceFileSet> exec_script_whitelist_;
 
   BuildSettings& operator=(const BuildSettings&) = delete;
+  bool ohos_components_support_ = false;
 };
 
 #endif  // TOOLS_GN_BUILD_SETTINGS_H_

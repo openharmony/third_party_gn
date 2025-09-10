@@ -99,6 +99,10 @@ bool BuildSettings::GetExternalDepsLabel(const Value& external_dep, std::string&
 bool BuildSettings::GetPrivateDepsLabel(const Value& dep, std::string& label,
   const Label& current_toolchain, int &whole_status, Err* err) const
 {
+  if (!is_ohos_components_enabled()) {
+    label = dep.string_value();
+    return true;
+  }
   if (ohos_components_ == nullptr) {
     *err = Err(dep, "Components information not loaded.");
     return false;
@@ -108,10 +112,7 @@ bool BuildSettings::GetPrivateDepsLabel(const Value& dep, std::string& label,
 
 bool BuildSettings::is_ohos_components_enabled() const
 {
-  if (ohos_components_ != nullptr) {
-    return true;
-  }
-  return false;
+  return ohos_components_support_;
 }
 
 const OhosComponent *BuildSettings::GetOhosComponent(const std::string& label) const
