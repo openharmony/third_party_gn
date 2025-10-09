@@ -110,20 +110,20 @@ bool Visibility::CheckItemVisibility(const Item *from, const Item *to, bool is_e
     const OhosComponent *from_component = from->ohos_component();
     const OhosComponent *to_component = to->ohos_component();
 
-    PreciseManager* precisehManager = PreciseManager::GetInstance();
-    if (precisehManager != nullptr) {
-        Node *fromNode = precisehManager->GetModule(from_label);
+    PreciseManager* preciseManager = PreciseManager::GetInstance();
+    if (preciseManager != nullptr) {
+        Node *fromNode = preciseManager->GetModule(from_label);
         if (!fromNode) {
           fromNode = new Module(from_label, from_label, from);
         }
-        Node *toNode = precisehManager->GetModule(to_label);
+        Node *toNode = preciseManager->GetModule(to_label);
         if (!toNode) {
           toNode = new Module(to_label, to_label, to);
         }
         fromNode->AddTo(toNode);
         toNode->AddFrom(fromNode);
-        precisehManager->AddModule(from_label, fromNode);
-        precisehManager->AddModule(to_label, toNode);
+        preciseManager->AddModule(from_label, fromNode);
+        preciseManager->AddModule(to_label, toNode);
     }
 
     if ((from_component == nullptr) || (to_component == nullptr)) {
