@@ -22,6 +22,7 @@
 #include "gn/commands.h"
 #include "gn/exec_process.h"
 #include "gn/filesystem_utils.h"
+#include "gn/graph/include/graph.h"
 #include "gn/innerapis_publicinfo_generator.h"
 #include "gn/input_file.h"
 #include "gn/label_pattern.h"
@@ -487,6 +488,11 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
     const Value* preciseConfig = build_settings_.build_args().GetArgOverride("ohos_precise_config");
     PreciseManager::Init(build_dir, preciseConfig);
   }
+
+  const Value* graphEnable = build_settings_.build_args().GetArgOverride("ohos_graph_enable");
+  if (graphEnable && graphEnable->boolean_value()) {
+    Graph::Init(build_dir);
+  }
   return true;
 }
 
@@ -619,6 +625,11 @@ bool Setup::RunPostMessageLoop(const base::CommandLine& cmdline) {
   PreciseManager* preciseManager = PreciseManager::GetInstance();
   if (preciseManager != nullptr) {
       preciseManager->GeneratPreciseTargets();
+  }
+
+  Graph* graph = Graph::GetInstance();
+  if (graph != nullptr) {
+    graph->GenGraph(builder_.GetAllResolvedItems());
   }
   return true;
 }

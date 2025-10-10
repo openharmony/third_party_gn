@@ -12,7 +12,7 @@
 class Node {
 public:
     Node(const std::string& name, const std::string& path);
-    ~Node();
+    ~Node() {}
 
     const std::string& GetName() const;
     const std::string& GetPath() const;
