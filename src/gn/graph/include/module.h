@@ -14,7 +14,7 @@ class Module : public Node {
 public:
 
     Module(const std::string& name, const std::string& path, const Item* item);
-    ~Module();
+    ~Module() {}
 
     const Item* GetItem() const;
     bool operator==(const Module& other) const {
