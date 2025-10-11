@@ -21,6 +21,10 @@ static const std::string COMPONENT_PATHS = "{"
                 "{"
                     "\"label\": \"//components/foo/interfaces/innerapis/libfoo:libfoo\","
                     "\"name\": \"libfoo\""
+                "},"
+                "{"
+                    "\"label\": \"//components/foo/interfaces/innerapis/libfoo:libfoo(//toolchain1)\","
+                    "\"name\": \"libfoo(toolchain1)\""
                 "}"
                 "]"
             "},"
@@ -104,6 +108,14 @@ TEST(OhosComponentsImpl, LoadComponentSubsystemAndPaths) {
     EXPECT_EQ(nullptr, component);
     component = mgr->matchComponentByLabel("components");
     EXPECT_EQ(nullptr, component);
+    std::string label_foo = mgr->GetComponentLabel("foo:libfoo");
+    EXPECT_EQ("//components/foo/interfaces/innerapis/libfoo:libfoo", label_foo);
+    std::string label_foo1 = mgr->GetComponentLabel("foo:libfoo1");
+    ASSERT_TRUE(label_foo1.empty());
+    std::string label_foo2 = mgr->GetComponentLabel("foo:libfoo(//toolchain1)");
+    EXPECT_EQ("//components/foo/interfaces/innerapis/libfoo:libfoo(//toolchain1)", label_foo2);
+
+
 
     Err err;
     Value external_dep(nullptr, "foo:libfoo");

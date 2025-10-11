@@ -76,6 +76,8 @@ public:
 
     const OhosComponent *GetComponentByName(const std::string &component_name) const;
 
+    std::string GetComponentLabel(const std::string &target_label) const;
+
 private:
     bool ReadBuildConfigFile(const std::string &build_dir,
                              const char *subfile, std::string &content);

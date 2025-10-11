@@ -9,6 +9,7 @@
 #include "base/files/file_util.h"
 #include "gn/filesystem_utils.h"
 #include "gn/ohos_components.h"
+#include "gn/standard_out.h"
 
 BuildSettings::BuildSettings() = default;
 
@@ -129,6 +130,29 @@ const OhosComponent *BuildSettings::GetOhosComponentByName(const std::string& co
         return nullptr;
     }
     return ohos_components_->GetComponentByName(component_name);
+}
+
+// [OHOS] Resolve target label with OHOS component info
+bool BuildSettings::ResolveTargetLabelWithOhosComponent(const Value& arg, 
+                                                     const SourceDir& current_dir,
+                                                     const Label& toolchain_label,
+                                                     Label* label,
+                                                     Err* err) const
+{
+    if (arg.type() == Value::STRING) {
+        std::string target_label = arg.string_value();
+        if (!target_label.empty() && is_ohos_components_enabled()) {
+            const std::string& label_str = ohos_components_->getComponentLabel(target_label);
+            OutputString("===================================target_label:"+ target_label +"=================================\n");
+            OutputString("===================================label_str:"+ label_str +"=================================\n");
+            if (!label_str.empty()) {
+                const Value& value = Value(arg.origin(), label_str);
+                *label = Label::Resolve(current_dir, root_path_utf8(), toolchain_label, value, err);
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 bool BuildSettings::isOhosIndepCompilerEnable() const {
