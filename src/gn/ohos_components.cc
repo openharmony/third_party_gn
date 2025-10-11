@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 #include "gn/ohos_components.h"
 
+#include <regex>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -597,6 +598,31 @@ bool OhosComponentsImpl::GetSubsystemName(const Value &component_name, std::stri
     return true;
 }
 
+std::string OhosComponentsImpl::GetComponentLabel(const std::string& target_label) const {
+  std::string pattern = R"(^[a-zA-Z0-9_.-]+:[a-zA-Z0-9_.-]+(?:\([\\\$\{\}a-zA-Z0-9._/:-]+\))?$)";
+  std::regex regexPattern(pattern);
+  if (std::regex_match(target_label, regexPattern)) {
+    size_t pos = target_label.find(':');
+    std::string component_str = target_label.substr(0, pos);
+    std::string innner_api_str = target_label.substr(pos + 1);
+    size_t toolchain_pos = innner_api_str.find("(");
+    const OhosComponent* component = GetComponentByName(component_str);
+    if (component) {
+      if(toolchain_pos != std::string::npos){
+        std::string innner_api = innner_api_str.substr(0, toolchain_pos);
+        std::string toolchain_suffix = innner_api_str.substr(toolchain_pos);
+        std::string parsed_target = component->getInnerApi(innner_api);
+        std::string parsed_innerapi =  parsed_target + toolchain_suffix;
+        return parsed_innerapi;
+      } else{
+        std::string parsed_innerapi = component->getInnerApi(innner_api_str);
+        return parsed_innerapi;
+      }
+    }
+  }
+  return {};
+}
+
 /**
  * Ohos Components Public API
  */
@@ -731,4 +757,11 @@ const OhosComponent *OhosComponents::GetComponentByName(const std::string &compo
 
 bool OhosComponents::isOhosIndepCompilerEnable() {
     return mgr && mgr->isOhosIndepCompilerEnable();
+}
+
+std::string OhosComponents::getComponentLabel(const std::string &component_name) const{
+    if(!mgr) {
+        return {};
+    }
+    return mgr->GetComponentLabel(component_name);
 }

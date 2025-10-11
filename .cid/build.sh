@@ -69,7 +69,7 @@ main() {
     fi
     
     log_section "Stage 5/5: Start Package"
-    if run_command tar -zcf "${PACKAGE_NAME}" "${OUT_DIR}/gn"; then
+    if run_command tar -zcf "${PACKAGE_NAME}" -C "${OUT_DIR}" gn; then
         echo -e "\n\033[1;32mSuccess! Package: ${PACKAGE_NAME}\033[0m"
         echo "Log Loaction: ${LOG_FILE}"
         echo "Packge Size: $(du -h ${PACKAGE_NAME} | cut -f1)"

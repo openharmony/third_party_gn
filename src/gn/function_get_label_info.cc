@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <regex>
 #include "gn/err.h"
 #include "gn/filesystem_utils.h"
 #include "gn/functions.h"
@@ -77,32 +76,6 @@ Examples
   # Returns string "//out/Debug/gen/foo/bar".
 )*";
 
-std::string getComponentLabel(const std::string& target_label,
-                              const BuildSettings* settings) {
-  std::string pattern = R"(^[a-zA-Z0-9_]+:[a-zA-Z0-9_.-]+(?:\([\\\$\{\}a-zA-Z0-9._/:-]+\))?$)";
-  std::regex regexPattern(pattern);
-  if (std::regex_match(target_label, regexPattern)) {
-    size_t pos = target_label.find(':');
-    std::string component_str = target_label.substr(0, pos);
-    std::string innner_api_str = target_label.substr(pos + 1);
-    size_t toolchain_pos = innner_api_str.find("(");
-    const OhosComponent* component =
-        settings->GetOhosComponentByName(component_str);
-    if (component) {
-      if(toolchain_pos != std::string::npos){
-        std::string innner_api = innner_api_str.substr(0, toolchain_pos);
-        std::string toolchain_suffix = innner_api_str.substr(toolchain_pos);
-        std::string parsed_target = component->getInnerApi(innner_api);
-        std::string parsed_innerapi =  parsed_target + toolchain_suffix;
-        return parsed_innerapi;
-      } else{
-        std::string parsed_innerapi = component->getInnerApi(innner_api_str);
-        return parsed_innerapi;
-      }
-    }
-  }
-  return {};
-}
 
 Value RunGetLabelInfo(Scope* scope,
                       const FunctionCallNode* function,
@@ -116,23 +89,17 @@ Value RunGetLabelInfo(Scope* scope,
   // Resolve the requested label.
   const BuildSettings* buildSettings = scope->settings()->build_settings();
   Label label;
-  std::string target = args[0].string_value();
   bool resolved = false;
-  // [OHOS] Resolve component info first
-  if (!target.empty()) {
-    const std::string& label_str = getComponentLabel(target, buildSettings);
-    if (!label_str.empty()) {
-      const Value& value = Value(args[0].origin(), label_str);
-      label =
-          Label::Resolve(scope->GetSourceDir(), buildSettings->root_path_utf8(),
-                         ToolchainLabelForScope(scope), value, err);
-      resolved = true;
-    }
-  }
+  // [OHOS] Resolve component info first using BuildSettings method
+  resolved = buildSettings->ResolveTargetLabelWithOhosComponent(args[0], 
+                                                             scope->GetSourceDir(),
+                                                             ToolchainLabelForScope(scope),
+                                                             &label,
+                                                             err);
+  
   if (!resolved) {
-    label =
-        Label::Resolve(scope->GetSourceDir(), buildSettings->root_path_utf8(),
-                       ToolchainLabelForScope(scope), args[0], err);
+    label = Label::Resolve(scope->GetSourceDir(), buildSettings->root_path_utf8(),
+                         ToolchainLabelForScope(scope), args[0], err);
   }
   if (label.is_null())
     return Value();
