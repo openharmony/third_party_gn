@@ -688,6 +688,7 @@ def WriteGNNinja(path, platform, host, options, args_list):
         'src/gn/generated_file_target_generator.cc',
         'src/gn/graph/src/module.cc',
         'src/gn/graph/src/node.cc',
+        'src/gn/graph/src/graph.cc',
         'src/gn/precise/precise.cc',
         'src/gn/group_target_generator.cc',
         'src/gn/header_checker.cc',
