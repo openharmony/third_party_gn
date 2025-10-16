@@ -17,6 +17,7 @@
 #include "gn/target.h"
 #include "gn/value.h"
 
+using Contents = Scope::KeyValueMap;
 struct PublicConfigInfoParams {
     const Target *target;
     std::string label;

@@ -109,6 +109,8 @@ public:
 
     const OhosComponent *GetComponentByName(const std::string &basicString);
 
+    std::string getComponentLabel(const std::string &component_name) const;
+
 private:
     OhosComponentsImpl *mgr = nullptr;
 
