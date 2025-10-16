@@ -24,6 +24,7 @@
 #include "gn/target.h"
 #include "gn/value.h"
 #include "gn/standard_out.h"
+#include "gn/metadata.h"
 
 InnerApiPublicInfoGenerator *InnerApiPublicInfoGenerator::instance_ = nullptr;
 
@@ -221,6 +222,25 @@ static std::string GetIncludeDirsInfo(const Target *target, const Config *config
     return info;
 }
 
+static std::string GetVisibilityInfo(const Config *config)
+{
+    std::string info = ",\n    \"visibility\": [\n      ";
+    std::unique_ptr<base::Value> visibility = config->visibility().AsValue();
+    if (visibility != nullptr) {
+        const std::vector<base::Value> &visibilityList = visibility->GetList();
+        bool first = true;
+        for(const base::Value &item : visibilityList){
+            if (!first) {
+                info += ",\n      ";
+            }
+            first = false;
+            info += "\"" + item.GetString() + "\"";
+        }
+    }
+    info += "\n    ]";
+    return info;
+}
+
 static std::string GetConfigInfo(const Target *target, const UniqueVector<LabelConfigPair> &configs,
     const OhosComponentChecker *checker, Err *err, bool isPublic)
 {
@@ -237,6 +257,7 @@ static std::string GetConfigInfo(const Target *target, const UniqueVector<LabelC
         }
         first = false;
         info += "\n    \"label\": \"" + label + "\"";
+        info += GetVisibilityInfo(config.ptr);
         info += GetIncludeDirsInfo(target, config.ptr, checker, err, isPublic);
         info += GetFlagsInfo(config.ptr);
         info += "  }";
@@ -358,6 +379,19 @@ static std::string GetOutNameAndTypeInfo(const Target *target, const std::string
     }
     info += ",\n  \"out_name\":\"" + name + "\"";
     info += ",\n  \"type\":\"" + type + "\"";
+    if (target->output_type() == Target::COPY_FILES && target->has_metadata()) {
+        const Contents& contents = target->metadata().contents();
+        auto iter = contents.find("install_modules");
+        if (iter != contents.end() && iter->second.type() == Value::LIST) {
+            const std::vector<Value>& list_value = iter->second.list_value();
+            if (!list_value.empty() && list_value[0].type() == Value::SCOPE) {
+                const Value* module_type_value = list_value[0].scope_value()->GetValue("module_type");
+                if (module_type_value && module_type_value->type() == Value::STRING) {
+                    info += ",\n  \"module_type\":\"" + module_type_value->string_value() + "\"";
+                }
+            }
+        }
+    }
     return info;
 }
 

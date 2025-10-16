@@ -156,6 +156,13 @@ class BuildSettings {
   bool isOhosIndepCompilerEnable() const;
 
   void set_ohos_components_support(bool enabled) { ohos_components_support_ = enabled; }
+  
+  // [OHOS] Resolve target label with OHOS component info
+  bool ResolveTargetLabelWithOhosComponent(const Value& arg, 
+                                         const SourceDir& current_dir,
+                                         const Label& toolchain_label,
+                                         Label* label, 
+                                         Err* err) const;
 private:
   Label root_target_label_;
   std::vector<LabelPattern> root_patterns_;
