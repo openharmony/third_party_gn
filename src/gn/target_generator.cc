@@ -21,10 +21,7 @@
 #include "gn/functions.h"
 #include "gn/generated_file_target_generator.h"
 #include "gn/group_target_generator.h"
-#include "gn/innerapis_publicinfo_generator.h"
 #include "gn/metadata.h"
-#include "gn/ohos_components.h"
-#include "gn/ohos_variables.h"
 #include "gn/parse_tree.h"
 #include "gn/scheduler.h"
 #include "gn/scope.h"
@@ -46,10 +43,6 @@ TargetGenerator::~TargetGenerator() = default;
 
 void TargetGenerator::Run() {
   // All target types use these.
-
-  if (!FillIncludes())
-    return;
-
   if (!FillDependentConfigs())
     return;
 
@@ -73,8 +66,6 @@ void TargetGenerator::Run() {
 
   if (!FillWriteRuntimeDeps())
     return;
-
-  FillCheckFlag();
 
   // Do type-specific generation.
   DoRun();
@@ -103,7 +94,7 @@ void TargetGenerator::GenerateTarget(Scope* scope,
     g_scheduler->Log("Defining target", label.GetUserVisibleName(true));
 
   std::unique_ptr<Target> target = std::make_unique<Target>(
-      scope->settings(), label, scope->build_dependency_files());
+      scope->settings(), label, scope->CollectBuildDependencyFiles());
   target->set_defined_from(function_call);
 
   // Create and call out to the proper generator.
@@ -195,19 +186,6 @@ bool TargetGenerator::FillSources() {
   return true;
 }
 
-bool TargetGenerator::FillIncludes() {
-  const Value* value = scope_->GetValue(variables::kIncludeDirs, true);
-  if (!value)
-    return true;
-
-  std::vector<SourceDir> dest_includes;
-  if (!ExtractListOfRelativeDirs(scope_->settings()->build_settings(), *value,
-                                  scope_->GetSourceDir(), &dest_includes, err_))
-    return false;
-  target_->include_dirs() = std::move(dest_includes);
-  return true;
-}
-
 bool TargetGenerator::FillPublic() {
   const Value* value = scope_->GetValue(variables::kPublic, true);
   if (!value)
@@ -224,25 +202,8 @@ bool TargetGenerator::FillPublic() {
   return true;
 }
 
-bool TargetGenerator::FillOwnConfigs() {
-  Scope::ItemVector *collector = scope_->GetItemCollector();
-    for (const auto &config : target_->configs()) {
-        std::string label = config.label.GetUserVisibleName(false);
-        for (auto &item : *collector) {
-            if (item->label().GetUserVisibleName(false) != label) {
-                continue;
-            }
-            target_->own_configs().push_back(config);
-        }
-    }
-    return true;
-}
-
 bool TargetGenerator::FillConfigs() {
-  if (!FillGenericConfigs(variables::kConfigs, &target_->configs())) {
-    return false;
-  }
-  return FillOwnConfigs();
+  return FillGenericConfigs(variables::kConfigs, &target_->configs());
 }
 
 bool TargetGenerator::FillDependentConfigs() {
@@ -252,14 +213,6 @@ bool TargetGenerator::FillDependentConfigs() {
 
   if (!FillGenericConfigs(variables::kPublicConfigs,
                           &target_->public_configs()))
-    return false;
-
-  if (!FillGenericConfigs(variables::kAllDependentConfigs,
-                          &target_->own_all_dependent_configs()))
-    return false;
-
-  if (!FillGenericConfigs(variables::kPublicConfigs,
-                          &target_->own_public_configs()))
     return false;
 
   return true;
@@ -301,20 +254,10 @@ bool TargetGenerator::FillData() {
 }
 
 bool TargetGenerator::FillDependencies() {
-  if (!FillGenericDepsWithWholeArchive(variables::kDeps, &target_->private_deps(),
-    &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
+  if (!FillGenericDeps(variables::kDeps, &target_->private_deps()))
     return false;
-  if (!FillGenericDepsWithWholeArchive(variables::kPublicDeps, &target_->public_deps(),
-    &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
+  if (!FillGenericDeps(variables::kPublicDeps, &target_->public_deps()))
     return false;
-  if (scope_->settings()->build_settings()->is_ohos_components_enabled()) {
-    if (!FillOhosComponentDeps(variables::kExternalDeps, &target_->private_deps(),
-        &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
-      return false;
-    if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps(),
-        &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
-      return false;
-  }
   if (!FillGenericDeps(variables::kDataDeps, &target_->data_deps()))
     return false;
   if (!FillGenericDeps(variables::kGenDeps, &target_->gen_deps()))
@@ -368,16 +311,6 @@ bool TargetGenerator::FillTestonly() {
     target_->set_testonly(value->boolean_value());
   }
   return true;
-}
-
-void TargetGenerator::FillCheckFlag() {
-  const Value* value = scope_->GetValue("check_flag", true);
-  if (value) {
-    if (!value->VerifyTypeIs(Value::BOOLEAN, err_))
-      return;
-    target_->set_checkflag(value->boolean_value());
-  }
-  return;
 }
 
 bool TargetGenerator::FillAssertNoDeps() {
@@ -496,30 +429,6 @@ bool TargetGenerator::FillGenericDeps(const char* var_name,
     ExtractListOfLabels(scope_->settings()->build_settings(), *value,
                         scope_->GetSourceDir(), ToolchainLabelForScope(scope_),
                         dest, err_);
-  }
-  return !err_->has_error();
-}
-
-bool TargetGenerator::FillGenericDepsWithWholeArchive(const char* var_name, LabelTargetVector* dest,
-  LabelTargetVector* whole_dest, LabelTargetVector* no_whole_dest) {
-  const Value* value = scope_->GetValue(var_name, true);
-  if (value) {
-    ExtractListOfLabelsMapping(target_->label().GetUserVisibleName(false), scope_->settings()->build_settings(),
-                               *value, scope_->GetSourceDir(), ToolchainLabelForScope(scope_),
-                               dest, whole_dest, no_whole_dest, err_);
-  }
-  return !err_->has_error();
-}
-
-bool TargetGenerator::FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest,
-  LabelTargetVector* whole_dest, LabelTargetVector* no_whole_dest)
-{
-  const Value* value = scope_->GetValue(var_name, true);
-  if (value) {
-    // Append to private deps
-    ExtractListOfExternalDeps(scope_->settings()->build_settings(), *value,
-                              scope_->GetSourceDir(), ToolchainLabelForScope(scope_),
-                              dest, whole_dest, no_whole_dest, err_);
   }
   return !err_->has_error();
 }

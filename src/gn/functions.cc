@@ -16,8 +16,6 @@
 #include "gn/config_values_generator.h"
 #include "gn/err.h"
 #include "gn/input_file.h"
-#include "gn/ohos_components_checker.h"
-#include "gn/ohos_components_mapping.h"
 #include "gn/parse_node_value_adapter.h"
 #include "gn/parse_tree.h"
 #include "gn/pool.h"
@@ -371,7 +369,7 @@ Value RunConfig(const FunctionCallNode* function,
 
   // Create the new config.
   std::unique_ptr<Config> config = std::make_unique<Config>(
-      scope->settings(), label, scope->build_dependency_files());
+      scope->settings(), label, scope->CollectBuildDependencyFiles());
   config->set_defined_from(function);
   if (!Visibility::FillItemVisibility(config.get(), scope, err))
     return Value();
@@ -684,28 +682,6 @@ Value RunImport(Scope* scope,
   const SourceDir& input_dir = scope->GetSourceDir();
   SourceFile import_file = input_dir.ResolveRelativeFile(
       args[0], err, scope->settings()->build_settings()->root_path_utf8());
-
-  const OhosComponentChecker *checker = OhosComponentChecker::getInstance();
-  if (checker != nullptr) {
-    checker->CheckImportOther(function, scope->settings()->build_settings(),
-                              input_dir.value(), import_file.value(), err);
-  }
-
-  std::string mapping_file = "";
-  const OhosComponentMapping *mapping = OhosComponentMapping::getInstance();
-  if (mapping != nullptr) {
-    mapping_file = mapping->MappingImportOther(scope->settings()->build_settings(),
-                                               input_dir.value(), import_file.value());
-  }
-
-  if (mapping_file != "") {
-    SourceFile real_file(mapping_file);
-    scope->AddBuildDependencyFile(real_file);
-    if (!err->has_error()) {
-      scope->settings()->import_manager().DoImport(real_file, function, scope, err);
-    }
-    return Value();
-  }
   scope->AddBuildDependencyFile(import_file);
   if (!err->has_error()) {
     scope->settings()->import_manager().DoImport(import_file, function, scope,
@@ -933,7 +909,7 @@ Value RunPool(const FunctionCallNode* function,
 
   // Create the new pool.
   std::unique_ptr<Pool> pool = std::make_unique<Pool>(
-      scope->settings(), label, scope->build_dependency_files());
+      scope->settings(), label, scope->CollectBuildDependencyFiles());
 
   if (label.name() == "console") {
     const Settings* settings = scope->settings();
@@ -1500,7 +1476,6 @@ struct FunctionInfoInitializer {
     INSERT_FUNCTION(Import, false)
     INSERT_FUNCTION(LabelMatches, false)
     INSERT_FUNCTION(NotNeeded, false)
-    INSERT_FUNCTION(PathExists, false)
     INSERT_FUNCTION(Pool, false)
     INSERT_FUNCTION(Print, false)
     INSERT_FUNCTION(PrintStackTrace, false)

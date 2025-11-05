@@ -15,9 +15,6 @@
 #include "gn/switches.h"
 #include "gn/test_with_scheduler.h"
 #include "util/test/test.h"
-#include "gn/build_settings.h"
-#include "gn/ohos_components.h"
-#include "gn/ohos_components_impl.h"
 
 using NinjaOutputsWriterTest = TestWithScheduler;
 using NinjaOutputsMap = NinjaOutputsWriter::MapType;
@@ -39,8 +36,6 @@ void BackgroundDoWrite(TargetWriteInfo* write_info, const Target* target) {
   std::string rule = NinjaTargetWriter::RunAndWriteFile(target, nullptr,
                                                         &target_ninja_outputs);
 
-  DCHECK(!rule.empty());
-
   std::lock_guard<std::mutex> lock(write_info->lock);
   write_info->ninja_outputs_map.emplace(target,
                                         std::move(target_ninja_outputs));
@@ -61,12 +56,10 @@ TEST_F(NinjaOutputsWriterTest, OutputsFile) {
 
   const char kDotfileContents[] = R"(
 buildconfig = "//BUILDCONFIG.gn"
-ohos_components_support = false
 )";
 
   const char kBuildConfigContents[] = R"(
 set_default_toolchain("//toolchain:default")
-ohos_components_support = false
 )";
 
   const char kToolchainBuildContents[] = R"##(
@@ -147,16 +140,14 @@ group("zoo") {
   std::string expected = R"##({
   "//:bar": [
     "bar.output",
-    "obj/bar.stamp"
+    "phony/bar"
   ],
   "//:foo": [
-    "obj/foo.stamp"
+    "phony/foo"
   ],
   "//:zoo": [
-    "obj/zoo.stamp"
   ],
   "//:zoo(//toolchain:secondary)": [
-    "secondary/obj/zoo.stamp"
   ]
 })##";
 

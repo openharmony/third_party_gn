@@ -593,10 +593,6 @@ Examples
     # Depend on the target to build the file before copying.
     deps = [ "//src/tools/melon" ]
   }
-
-Variables
-
-  copy_linkable_file
 )";
 
 Value RunCopy(const FunctionCallNode* function,
@@ -975,7 +971,8 @@ Variables
 
 )" DEPENDENT_CONFIG_VARS DEPS_VARS GENERAL_TARGET_VARS
 
-    R"(  Generated file: contents, data_keys, rebase, walk_keys, output_conversion
+    R"(  Generated file: contents, data_keys, rebase, walk_keys, output_conversion,
+                  outputs
 
 Example (metadata collection)
 

@@ -6,7 +6,6 @@
 #define TOOLS_GN_COPY_TARGET_GENERATOR_H_
 
 #include "gn/target_generator.h"
-#include "gn/ohos_variables.h"
 
 // Populates a Target with the values from a copy rule.
 class CopyTargetGenerator : public TargetGenerator {
@@ -23,9 +22,6 @@ class CopyTargetGenerator : public TargetGenerator {
  private:
   CopyTargetGenerator(const CopyTargetGenerator&) = delete;
   CopyTargetGenerator& operator=(const CopyTargetGenerator&) = delete;
-
-  bool FillCopyLinkableFile();
-  bool FillCopyRustTargetInfo();
 };
 
 #endif  // TOOLS_GN_COPY_TARGET_GENERATOR_H_

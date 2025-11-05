@@ -135,27 +135,27 @@ bool IsApplicationTarget(const Target* target) {
 
 bool IsXCUITestRunnerTarget(const Target* target) {
   return IsApplicationTarget(target) &&
-         base::ends_with(target->label().name(), kXCUITestRunnerTargetNamePostfix);
+         target->label().name().ends_with(kXCUITestRunnerTargetNamePostfix);
 }
 
 bool IsXCTestModuleTarget(const Target* target) {
   return target->output_type() == Target::CREATE_BUNDLE &&
          target->bundle_data().product_type() ==
              "com.apple.product-type.bundle.unit-test" &&
-         base::ends_with(target->label().name(), kXCTestModuleTargetNamePostfix);
+         target->label().name().ends_with(kXCTestModuleTargetNamePostfix);
 }
 
 bool IsXCUITestModuleTarget(const Target* target) {
   return target->output_type() == Target::CREATE_BUNDLE &&
          target->bundle_data().product_type() ==
              "com.apple.product-type.bundle.ui-testing" &&
-         base::ends_with(target->label().name(), kXCTestModuleTargetNamePostfix);
+         target->label().name().ends_with(kXCTestModuleTargetNamePostfix);
 }
 
 bool IsXCTestFile(const SourceFile& file) {
   std::string file_name = file.GetName();
   for (size_t i = 0; i < std::size(kXCTestFileSuffixes); ++i) {
-    if (base::ends_with(file_name, kXCTestFileSuffixes[i])) {
+    if (file_name.ends_with(kXCTestFileSuffixes[i])) {
       return true;
     }
   }
