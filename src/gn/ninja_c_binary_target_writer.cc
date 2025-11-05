@@ -134,10 +134,10 @@ void NinjaCBinaryTargetWriter::Run() {
 
   WriteCompilerVars(module_dep_info);
 
-  size_t num_stamp_uses = target_->sources().size();
+  size_t num_output_uses = target_->sources().size();
 
   std::vector<OutputFile> input_deps =
-      WriteInputsStampAndGetDep(num_stamp_uses);
+      WriteInputsStampOrPhonyAndGetDep(num_output_uses);
 
   // The input dependencies will be an order-only dependency. This will cause
   // Ninja to make sure the inputs are up to date before compiling this source,
@@ -166,11 +166,11 @@ void NinjaCBinaryTargetWriter::Run() {
   // The order only deps are referenced by each source file compile,
   // but also by PCH compiles.  The latter are annoying to count, so omit
   // them here.  This means that binary targets with a single source file
-  // that also use PCH files won't have a stamp file even though having
+  // that also use PCH files won't have a phony target even though having
   // one would make output ninja file size a bit lower. That's ok, binary
   // targets with a single source are rare.
-  std::vector<OutputFile> order_only_deps = WriteInputDepsStampAndGetDep(
-      std::vector<const Target*>(), num_stamp_uses);
+  std::vector<OutputFile> order_only_deps = WriteInputDepsStampOrPhonyAndGetDep(
+      std::vector<const Target*>(), num_output_uses);
 
   // For GCC builds, the .gch files are not object files, but still need to be
   // added as explicit dependencies below. The .gch output files are placed in
@@ -525,7 +525,9 @@ void NinjaCBinaryTargetWriter::WriteSwiftSources(
 
   for (const Target* swiftmodule :
        resolved().GetSwiftModuleDependencies(target_)) {
-    swift_order_only_deps.push_back(swiftmodule->dependency_output_file());
+      CHECK(swiftmodule->has_dependency_output()); {
+    swift_order_only_deps.push_back(swiftmodule->dependency_output());
+    }
   }
 
   const Tool* tool = target_->swift_values().GetTool(target_);
@@ -552,10 +554,13 @@ void NinjaCBinaryTargetWriter::WriteSourceSetStamp(
   DCHECK(classified_deps.extra_object_files.empty());
 
   std::vector<OutputFile> order_only_deps;
-  for (auto* dep : classified_deps.non_linkable_deps)
-    order_only_deps.push_back(dep->dependency_output_file());
+  for (auto* dep : classified_deps.non_linkable_deps) {
+    if (dep->has_dependency_output()) {
+      order_only_deps.push_back(dep->dependency_output());
+    }
+  }
 
-  WriteStampForTarget(object_files, order_only_deps);
+  WriteStampOrPhonyForTarget(object_files, order_only_deps);
 }
 
 void NinjaCBinaryTargetWriter::WriteLinkerStuff(
@@ -569,8 +574,7 @@ void NinjaCBinaryTargetWriter::WriteLinkerStuff(
   out_ << "build";
   WriteOutputs(output_files);
 
-  out_ << ": " << rule_prefix_
-       << Tool::GetToolTypeForTargetFinalOutput(target_);
+  out_ << ": " << rule_prefix_ << tool_->name();
 
   ClassifiedDeps classified_deps = GetClassifiedDeps();
 
@@ -591,11 +595,11 @@ void NinjaCBinaryTargetWriter::WriteLinkerStuff(
         cur->output_type() == Target::RUST_PROC_MACRO)
       continue;
 
-    if (cur->dependency_output_file().value() !=
-        cur->link_output_file().value()) {
+    if (cur->has_dependency_output() &&
+        cur->dependency_output().value() != cur->link_output_file().value()) {
       // This is a shared library with separate link and deps files. Save for
       // later.
-      implicit_deps.push_back(cur->dependency_output_file());
+      implicit_deps.push_back(cur->dependency_output());
       solibs.push_back(cur->link_output_file());
     } else {
       // Normal case, just link to this target.
@@ -625,12 +629,13 @@ void NinjaCBinaryTargetWriter::WriteLinkerStuff(
   }
 
   // If any target creates a framework bundle, then treat it as an implicit
-  // dependency via the .stamp file. This is a pessimisation as it is not
+  // dependency via the phony target. This is a pessimisation as it is not
   // always necessary to relink the current target if one of the framework
   // is regenerated, but it ensure that if one of the framework API changes,
   // any dependent target will relink it (see crbug.com/1037607).
   for (const Target* dep : classified_deps.framework_deps) {
-    implicit_deps.push_back(dep->dependency_output_file());
+    if (dep->has_dependency_output())
+      implicit_deps.push_back(dep->dependency_output());
   }
 
   // The input dependency is only needed if there are no object files, as the
@@ -646,6 +651,7 @@ void NinjaCBinaryTargetWriter::WriteLinkerStuff(
     for (const auto& inherited : resolved().GetInheritedLibraries(target_)) {
       const Target* dep = inherited.target();
       if (dep->output_type() == Target::RUST_LIBRARY) {
+        CHECK(dep->has_dependency_output_file());
         transitive_rustlibs.push_back(dep->dependency_output_file());
         implicit_deps.push_back(dep->dependency_output_file());
       }
@@ -679,11 +685,11 @@ void NinjaCBinaryTargetWriter::WriteLinkerStuff(
   // this target.
   //
   // The action dependencies are not strictly necessary in this case. They
-  // should also have been collected via the input deps stamp that each source
-  // file has for an order-only dependency, and since this target depends on
-  // the sources, there is already an implicit order-only dependency. However,
-  // it's extra work to separate these out and there's no disadvantage to
-  // listing them again.
+  // should also have been collected via the input deps phony alias that each
+  // source file has for an order-only dependency, and since this target depends
+  // on the sources, there is already an implicit order-only dependency.
+  // However, it's extra work to separate these out and there's no disadvantage
+  // to listing them again.
   WriteOrderOnlyDependencies(classified_deps.non_linkable_deps);
 
   // End of the link "build" line.
@@ -715,77 +721,25 @@ void NinjaCBinaryTargetWriter::WriteLinkerStuff(
   WriteOutputSubstitutions();
   WriteLibsList("solibs", solibs);
   WriteLibsList("rlibs", transitive_rustlibs);
-  
-  const Toolchain *toolchain = target_->toolchain();
-  if (toolchain == nullptr || toolchain->GetToolAsC(CTool::kCToolSolink) == nullptr) {
-    return;
-  }
-  int toolchain_whole_status = toolchain->GetToolAsC(CTool::kCToolSolink)->toolchain_whole_status();
-  if (toolchain_whole_status == 0) {
-    WriteWholeArchive(toolchain_whole_status);
-  } else if (toolchain_whole_status == 1){
-    WriteNoWholeArchive(toolchain_whole_status);
-  }
-  return;
-}
-
-void NinjaCBinaryTargetWriter::WriteWholeArchive(int toolchain_whole_status) {
-
-  if (target_->whole_archive_deps().size() == 0) {
-    return;
-  }
-  std::string result;
-  for (const auto& file : target_->whole_archive_deps()) {
-    std::string label = file.label.GetUserVisibleName(false);
-    size_t sep = label.find(":");
-    if (sep == std::string::npos) {
-      continue;
-    }
-    result +=  label.substr(sep + 1) + ".a";
-    result += " ";
-  }
-
-  out_ << "  toolchain_whole_status = "
-       << toolchain_whole_status;
-  out_ << std::endl;
-
-  out_ << "  whole-archive = "
-       << result;
-  out_ << std::endl;
-}
-
-void NinjaCBinaryTargetWriter::WriteNoWholeArchive(int toolchain_whole_status) {
-  if (target_->no_whole_archive_deps().size() == 0) {
-    return;
-  }
-  std::string result;
-  for (const auto& file : target_->no_whole_archive_deps()) {
-    std::string label = file.label.GetUserVisibleName(false);
-    size_t sep = label.find(":");
-    if (sep == std::string::npos) {
-      continue;
-    }
-    result +=  label.substr(sep + 1) + ".a";
-    result += " ";
-  }
-
-  out_ << "  toolchain_whole_status = "
-       << toolchain_whole_status;
-  out_ << std::endl;
-
-  out_ << "  no-whole-archive = "
-       << result;
-  out_ << std::endl;
+  WritePool(out_);
 }
 
 void NinjaCBinaryTargetWriter::WriteOutputSubstitutions() {
-  out_ << "  output_extension = "
-       << SubstitutionWriter::GetLinkerSubstitution(
-              target_, tool_, &SubstitutionOutputExtension);
+  const std::string output_extension =
+      SubstitutionWriter::GetLinkerSubstitution(target_, tool_,
+                                                &SubstitutionOutputExtension);
+  out_ << "  output_extension =";
+  if (!output_extension.empty()) {
+    out_ << " " << output_extension;
+  }
   out_ << std::endl;
-  out_ << "  output_dir = "
-       << SubstitutionWriter::GetLinkerSubstitution(target_, tool_,
-                                                    &SubstitutionOutputDir);
+
+  const std::string output_dir = SubstitutionWriter::GetLinkerSubstitution(
+      target_, tool_, &SubstitutionOutputDir);
+  out_ << "  output_dir =";
+  if (!output_dir.empty()) {
+    out_ << " " << output_dir;
+  }
   out_ << std::endl;
 }
 
@@ -810,8 +764,10 @@ void NinjaCBinaryTargetWriter::WriteOrderOnlyDependencies(
 
     // Non-linkable targets.
     for (auto* non_linkable_dep : non_linkable_deps) {
-      out_ << " ";
-      path_output_.WriteFile(out_, non_linkable_dep->dependency_output_file());
+      if (non_linkable_dep->has_dependency_output()) {
+        out_ << " ";
+        path_output_.WriteFile(out_, non_linkable_dep->dependency_output());
+      }
     }
   }
 }

@@ -47,10 +47,8 @@ class TargetGenerator {
   const BuildSettings* GetBuildSettings() const;
 
   virtual bool FillSources();
-  bool FillIncludes();
   bool FillPublic();
   bool FillConfigs();
-  bool FillOwnConfigs();
   bool FillOutputs(bool allow_substitutions);
   bool FillCheckIncludes();
   bool FillOutputExtension();
@@ -74,18 +72,12 @@ class TargetGenerator {
   bool FillTestonly();
   bool FillAssertNoDeps();
   bool FillWriteRuntimeDeps();
-  void FillCheckFlag();
 
   // Reads configs/deps from the given var name, and uses the given setting on
   // the target to save them.
   bool FillGenericConfigs(const char* var_name,
                           UniqueVector<LabelConfigPair>* dest);
   bool FillGenericDeps(const char* var_name, LabelTargetVector* dest);
-
-  bool FillOhosComponentDeps(const char* var_name, LabelTargetVector* dest,
-    LabelTargetVector* whole_dest, LabelTargetVector* no_whole_dest);
-  bool FillGenericDepsWithWholeArchive(const char* var_name, LabelTargetVector* dest,
-    LabelTargetVector* whole_dest, LabelTargetVector* no_whole_dest);
 
   TargetGenerator(const TargetGenerator&) = delete;
   TargetGenerator& operator=(const TargetGenerator&) = delete;

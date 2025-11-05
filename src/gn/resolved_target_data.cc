@@ -109,14 +109,12 @@ void ResolvedTargetData::ComputeInheritedLibsFor(
     if (dep->output_type() == Target::STATIC_LIBRARY ||
         dep->output_type() == Target::SHARED_LIBRARY ||
         dep->output_type() == Target::RUST_LIBRARY ||
-        dep->output_type() == Target::SOURCE_SET || 
-        dep->copy_linkable_file() ||
+        dep->output_type() == Target::SOURCE_SET ||
         (dep->output_type() == Target::CREATE_BUNDLE &&
          dep->bundle_data().is_framework())) {
       inherited_libraries->Append(dep, is_public);
     }
-    if (dep->output_type() == Target::SHARED_LIBRARY ||
-        dep->copy_linkable_file()) {
+    if (dep->output_type() == Target::SHARED_LIBRARY) {
       // Shared library dependendencies are inherited across public shared
       // library boundaries.
       //
@@ -139,8 +137,7 @@ void ResolvedTargetData::ComputeInheritedLibsFor(
       // resolved by the compiler.
       const TargetInfo* dep_info = GetTargetInheritedLibs(dep);
       for (const auto& pair : dep_info->inherited_libs) {
-        if ((pair.target()->output_type() == Target::SHARED_LIBRARY ||
-            pair.target()->copy_linkable_file()) &&
+        if (pair.target()->output_type() == Target::SHARED_LIBRARY &&
             pair.is_public()) {
           inherited_libraries->Append(pair.target(), is_public);
         }
@@ -196,7 +193,7 @@ void ResolvedTargetData::ComputeRustLibsFor(base::span<const Target*> deps,
         dep->output_type() == Target::SHARED_LIBRARY ||
         dep->output_type() == Target::SOURCE_SET ||
         dep->output_type() == Target::RUST_LIBRARY ||
-        dep->output_type() == Target::GROUP || dep->copy_linkable_file()) {
+        dep->output_type() == Target::GROUP) {
       // Here we have: `this` --[depends-on]--> `dep`
       //
       // The `this` target has direct access to `dep` since its a direct

@@ -13,7 +13,6 @@
 #include "gn/builder.h"
 #include "gn/label_pattern.h"
 #include "gn/loader.h"
-#include "gn/ohos_components.h"
 #include "gn/scheduler.h"
 #include "gn/scope.h"
 #include "gn/settings.h"
@@ -139,8 +138,6 @@ class Setup {
   // Fills build arguments. Returns true on success.
   bool FillArguments(const base::CommandLine& cmdline, Err* err);
 
-  bool FillOhosComponentsInfo(const std::string& build_dir, Err* err);
-
   // Fills the build arguments from the command line or from the build arg file.
   bool FillArgsFromCommandLine(const std::string& args, Err* err);
   bool FillArgsFromFile(Err* err);
@@ -173,8 +170,6 @@ class Setup {
   bool FillOtherConfig(const base::CommandLine& cmdline, Err* err);
 
   BuildSettings build_settings_;
-  OhosComponents ohos_components_;
-
   scoped_refptr<LoaderImpl> loader_;
   Builder builder_;
 

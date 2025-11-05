@@ -6,7 +6,6 @@
 
 #include "gn/build_settings.h"
 #include "gn/filesystem_utils.h"
-#include "gn/ohos_variables.h"
 #include "gn/parse_tree.h"
 #include "gn/scope.h"
 #include "gn/value.h"
@@ -18,65 +17,6 @@ CopyTargetGenerator::CopyTargetGenerator(Target* target,
     : TargetGenerator(target, scope, function_call, err) {}
 
 CopyTargetGenerator::~CopyTargetGenerator() = default;
-
-bool CopyTargetGenerator::FillCopyLinkableFile()
-{
-    const Value* value = scope_->GetValue(variables::kCopyLinkableFile, true);
-    if (!value)
-        return true;
-    if (!value->VerifyTypeIs(Value::BOOLEAN, err_))
-        return false;
-    target_->set_copy_linkable_file(value->boolean_value());
-  return true;
-}
-
-bool CopyTargetGenerator::FillCopyRustTargetInfo() {
-  const Value* rustCrateType =
-      scope_->GetValue(variables::kCopyRustCrateType, true);
-  const Value* rustCrateName =
-      scope_->GetValue(variables::kCopyRustCrateName, true);
-
-  if (!rustCrateName || !rustCrateType) {
-    return true;
-  }
-
-  if (!(rustCrateType->VerifyTypeIs(Value::STRING, err_) &&
-        rustCrateName->VerifyTypeIs(Value::STRING, err_)))
-    return false;
-
-  target_->rust_values().crate_name() =
-      std::move(rustCrateName->string_value());
-
-  if (rustCrateType->string_value() == "bin") {
-    target_->rust_values().set_crate_type(RustValues::CRATE_BIN);
-    return true;
-  }
-  if (rustCrateType->string_value() == "cdylib") {
-    target_->rust_values().set_crate_type(RustValues::CRATE_CDYLIB);
-    return true;
-  }
-  if (rustCrateType->string_value() == "dylib") {
-    target_->rust_values().set_crate_type(RustValues::CRATE_DYLIB);
-    return true;
-  }
-  if (rustCrateType->string_value() == "proc-macro") {
-    target_->rust_values().set_crate_type(RustValues::CRATE_PROC_MACRO);
-    return true;
-  }
-  if (rustCrateType->string_value() == "rlib") {
-    target_->rust_values().set_crate_type(RustValues::CRATE_RLIB);
-    return true;
-  }
-  if (rustCrateType->string_value() == "staticlib") {
-    target_->rust_values().set_crate_type(RustValues::CRATE_STATICLIB);
-    return true;
-  }
-
-  *err_ =
-      Err(rustCrateType->origin(),
-          "Inadmissible crate type \"" + rustCrateType->string_value() + "\".");
-  return false;
-}
 
 void CopyTargetGenerator::DoRun() {
   target_->set_output_type(Target::COPY_FILES);
@@ -101,10 +41,4 @@ void CopyTargetGenerator::DoRun() {
         "source_expansion\").");
     return;
   }
-  
-  if (!FillCopyLinkableFile())
-    return;
-
-  if (!FillCopyRustTargetInfo())
-    return;
 }
