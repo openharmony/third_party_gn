@@ -21,8 +21,6 @@
 #include "gn/version.h"
 
 class Item;
-class OhosComponent;
-class OhosComponents;
 
 // Settings for one build, which is one toplevel output directory. There
 // may be multiple Settings objects that refer to this, one for each toolchain.
@@ -63,15 +61,6 @@ class BuildSettings {
   // Path of the python executable to run scripts with.
   base::FilePath python_path() const { return python_path_; }
   void set_python_path(const base::FilePath& p) { python_path_ = p; }
-  
-  // OpenHarmony components manager.
-  void SetOhosComponentsInfo(OhosComponents *ohos_components);
-  bool GetExternalDepsLabel(const Value& external_dep, std::string& label,
-    const Label& current_toolchain, int &whole_status, Err* err) const;
-  bool GetPrivateDepsLabel(const Value &dep, std::string &label,
-    const Label& current_toolchain, int &whole_status, Err *err) const;
-  bool is_ohos_components_enabled() const;
-  const OhosComponent *GetOhosComponent(const std::string& label) const;
 
   // Required Ninja version.
   const Version& ninja_required_version() const {
@@ -140,7 +129,8 @@ class BuildSettings {
   // callback is is_null() (the default) the output will be printed to the
   // console.
   const PrintCallback& print_callback() const { return print_callback_; }
-  void set_print_callback(const PrintCallback& cb) { print_callback_ = cb; }
+  void set_print_callback(const PrintCallback cb) { print_callback_ = cb; }
+  const PrintCallback swap_print_callback(const PrintCallback cb);
 
   // A list of files that can call exec_script(). If the returned pointer is
   // null, exec_script may be called from anywhere.
@@ -151,19 +141,7 @@ class BuildSettings {
     exec_script_whitelist_ = std::move(list);
   }
 
-  const OhosComponent *GetOhosComponentByName(const std::string &component_name) const;
-
-  bool isOhosIndepCompilerEnable() const;
-
-  void set_ohos_components_support(bool enabled) { ohos_components_support_ = enabled; }
-  
-  // [OHOS] Resolve target label with OHOS component info
-  bool ResolveTargetLabelWithOhosComponent(const Value& arg, 
-                                         const SourceDir& current_dir,
-                                         const Label& toolchain_label,
-                                         Label* label, 
-                                         Err* err) const;
-private:
+ private:
   Label root_target_label_;
   std::vector<LabelPattern> root_patterns_;
   base::FilePath dotfile_name_;
@@ -172,11 +150,9 @@ private:
   base::FilePath secondary_source_path_;
   base::FilePath python_path_;
 
-  OhosComponents *ohos_components_ = nullptr;
-
   // See 40045b9 for the reason behind using 1.7.2 as the default version.
   Version ninja_required_version_{1, 7, 2};
-  bool no_stamp_files_ = false;
+  bool no_stamp_files_ = true;
 
   SourceFile build_config_file_;
   SourceFile arg_file_template_path_;
@@ -189,7 +165,6 @@ private:
   std::unique_ptr<SourceFileSet> exec_script_whitelist_;
 
   BuildSettings& operator=(const BuildSettings&) = delete;
-  bool ohos_components_support_ = false;
 };
 
 #endif  // TOOLS_GN_BUILD_SETTINGS_H_

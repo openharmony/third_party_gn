@@ -83,16 +83,6 @@ class CTool : public Tool {
     depend_output_ = std::move(dep_out);
   }
 
-  // Other functions ----------------------------------------------------------
-
-  // Returns true if this tool has separate outputs for dependency tracking
-  // and linking.
-  bool has_separate_solink_files() const {
-    return !link_output_.empty() || !depend_output_.empty();
-  }
-
-  int toolchain_whole_status() const { return toolchain_whole_status_; }
-
  private:
   // Initialization functions -------------------------------------------------
   //
@@ -102,9 +92,8 @@ class CTool : public Tool {
   bool ValidateOutputSubstitution(const Substitution* sub_type) const;
   bool ValidateRuntimeOutputs(Err* err);
   // Validates either link_output or depend_output. To generalize to either,
-  // pass
-  // the associated pattern, and the variable name that should appear in error
-  // messages.
+  // pass the associated pattern, and the variable name that should appear in
+  // error messages.
   bool ValidateLinkAndDependOutput(const SubstitutionPattern& pattern,
                                    const char* variable_name,
                                    Err* err);
@@ -120,7 +109,6 @@ class CTool : public Tool {
   PrecompiledHeaderType precompiled_header_type_;
   SubstitutionPattern link_output_;
   SubstitutionPattern depend_output_;
-  int toolchain_whole_status_ = -1;
 
   CTool(const CTool&) = delete;
   CTool& operator=(const CTool&) = delete;

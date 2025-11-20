@@ -35,7 +35,6 @@ struct LabelPtrPair {
   ~LabelPtrPair() = default;
 
   Label label;
-  bool is_external_deps;
   const T* ptr = nullptr;
 
   // The origin of this dependency. This will be null for internally generated

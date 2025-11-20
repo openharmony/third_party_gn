@@ -411,13 +411,13 @@ void Printer::SortIfApplicable(const BinaryOpNode* binop) {
        binop->op().value() == "-=") &&
       ident) {
     const std::string_view lhs = ident->value().value();
-    if (base::ends_with(lhs, "sources") || lhs == "public") {
+    if (lhs.ends_with("sources") || lhs == "public") {
       TraverseBinaryOpNode(binop->right(), [](const ParseNode* node) {
         const ListNode* list = node->AsList();
         if (list)
           const_cast<ListNode*>(list)->SortAsStringsList();
       });
-    } else if (base::ends_with(lhs, "deps") || lhs == "visibility") {
+    } else if (lhs.ends_with("deps") || lhs == "visibility") {
       TraverseBinaryOpNode(binop->right(), [](const ParseNode* node) {
         const ListNode* list = node->AsList();
         if (list)

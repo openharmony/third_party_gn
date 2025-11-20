@@ -256,9 +256,6 @@ bool Builder::TargetDefined(BuilderRecord* record, Err* err) {
       !AddDeps(record, target->configs().vector(), err) ||
       !AddDeps(record, target->all_dependent_configs(), err) ||
       !AddDeps(record, target->public_configs(), err) ||
-      !AddDeps(record, target->own_configs().vector(), err) ||
-      !AddDeps(record, target->own_all_dependent_configs(), err) ||
-      !AddDeps(record, target->own_public_configs(), err) ||
       !AddGenDeps(record, target->gen_deps(), err) ||
       !AddPoolDep(record, target, err) || !AddToolchainDep(record, target, err))
     return false;
@@ -506,9 +503,6 @@ bool Builder::ResolveItem(BuilderRecord* record, Err* err) {
         !ResolveConfigs(&target->configs(), err) ||
         !ResolveConfigs(&target->all_dependent_configs(), err) ||
         !ResolveConfigs(&target->public_configs(), err) ||
-        !ResolveConfigs(&target->own_configs(), err) ||
-        !ResolveConfigs(&target->own_all_dependent_configs(), err) ||
-        !ResolveConfigs(&target->own_public_configs(), err) ||
         !ResolvePool(target, err) || !ResolveToolchain(target, err))
       return false;
   } else if (record->type() == BuilderRecord::ITEM_CONFIG) {

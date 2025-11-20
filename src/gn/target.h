@@ -14,11 +14,9 @@
 #include "gn/action_values.h"
 #include "gn/bundle_data.h"
 #include "gn/config_values.h"
-#include "gn/inherited_libraries.h"
 #include "gn/item.h"
 #include "gn/label_pattern.h"
 #include "gn/label_ptr.h"
-#include "gn/lib_file.h"
 #include "gn/metadata.h"
 #include "gn/output_file.h"
 #include "gn/pointer_set.h"
@@ -141,9 +139,6 @@ class Target : public Item {
   const FileList& sources() const { return sources_; }
   FileList& sources() { return sources_; }
 
-  const std::vector<SourceDir>& include_dirs() const { return include_dirs_; }
-  std::vector<SourceDir>& include_dirs() { return include_dirs_; }
-
   const SourceFileTypeSet& source_types_used() const {
     return source_types_used_;
   }
@@ -168,18 +163,6 @@ class Target : public Item {
   void set_complete_static_lib(bool complete) {
     DCHECK_EQ(STATIC_LIBRARY, output_type_);
     complete_static_lib_ = complete;
-  }
-
-  // Whether this copy target is linkable.
-  bool copy_linkable_file() const { return copy_linkable_file_; }
-  void set_copy_linkable_file(bool linkable)
-  {
-      DCHECK_EQ(COPY_FILES, output_type_);
-      copy_linkable_file_ = linkable;
-  }
-  bool copy_rust_file() const {
-    return copy_linkable_file_ && output_type_ == COPY_FILES &&
-           has_rust_values();
   }
 
   // Metadata. Target takes ownership of the resulting scope.
@@ -269,14 +252,6 @@ class Target : public Item {
   const LabelTargetVector& private_deps() const { return private_deps_; }
   LabelTargetVector& private_deps() { return private_deps_; }
 
-  // Linked whole archive dependencies.
-  const LabelTargetVector& whole_archive_deps() const { return whole_archive_deps_; }
-  LabelTargetVector& whole_archive_deps() { return whole_archive_deps_; }
-
-  // Linked no whole archive dependencies.
-  const LabelTargetVector& no_whole_archive_deps() const { return no_whole_archive_deps_; }
-  LabelTargetVector& no_whole_archive_deps() { return no_whole_archive_deps_; }
-
   // Linked public dependencies.
   const LabelTargetVector& public_deps() const { return public_deps_; }
   LabelTargetVector& public_deps() { return public_deps_; }
@@ -295,10 +270,6 @@ class Target : public Item {
   const UniqueVector<LabelConfigPair>& configs() const { return configs_; }
   UniqueVector<LabelConfigPair>& configs() { return configs_; }
 
-  // List of direct configs that this target, excluding the indirect config passed by.
-  const UniqueVector<LabelConfigPair>& own_configs() const { return own_configs_; }
-  UniqueVector<LabelConfigPair>& own_configs() { return own_configs_; }
-
   // List of configs that all dependencies (direct and indirect) of this
   // target get. These configs are not added to this target. Note that due
   // to the way this is computed, there may be duplicates in this list.
@@ -309,14 +280,6 @@ class Target : public Item {
     return all_dependent_configs_;
   }
 
-  // List of direct all_dependent_configs that this target, excluding the indirect config passed by.
-  const UniqueVector<LabelConfigPair>& own_all_dependent_configs() const {
-    return own_all_dependent_configs_;
-  }
-  UniqueVector<LabelConfigPair>& own_all_dependent_configs() {
-    return own_all_dependent_configs_;
-  }
-
   // List of configs that targets depending directly on this one get. These
   // configs are also added to this target.
   const UniqueVector<LabelConfigPair>& public_configs() const {
@@ -324,22 +287,12 @@ class Target : public Item {
   }
   UniqueVector<LabelConfigPair>& public_configs() { return public_configs_; }
 
-  // List of direct public_configs that this target, excluding the indirect config passed by.
-  const UniqueVector<LabelConfigPair>& own_public_configs() const {
-    return own_public_configs_;
-  }
-  UniqueVector<LabelConfigPair>& own_public_configs() { return own_public_configs_; }
-
   // Dependencies that can include files from this target.
   const std::set<Label>& allow_circular_includes_from() const {
     return allow_circular_includes_from_;
   }
   std::set<Label>& allow_circular_includes_from() {
     return allow_circular_includes_from_;
-  }
-
-  const InheritedLibraries& inherited_libraries() const {
-    return inherited_libraries_;
   }
 
   // Pool option
@@ -361,36 +314,12 @@ class Target : public Item {
 
   // Return true if this targets builds a SwiftModule
   bool builds_swift_module() const {
-    return IsBinary() && has_swift_values() &&
-           source_types_used().SwiftSourceUsed();
+    return IsBinary() && source_types_used().SwiftSourceUsed();
   }
 
   RustValues& rust_values();
   const RustValues& rust_values() const;
   bool has_rust_values() const { return rust_values_.get(); }
-
-  // Transitive closure of libraries that are depended on by this target
-  const InheritedLibraries& rust_transitive_inherited_libs() const {
-    return rust_transitive_inherited_libs_;
-  }
-  const InheritedLibraries& rust_transitive_inheritable_libs() const {
-    return rust_transitive_inheritable_libs_;
-  }
-
-  const UniqueVector<SourceDir>& all_lib_dirs() const { return all_lib_dirs_; }
-  const UniqueVector<LibFile>& all_libs() const { return all_libs_; }
-
-  const UniqueVector<SourceDir>& all_framework_dirs() const {
-    return all_framework_dirs_;
-  }
-  const UniqueVector<std::string>& all_frameworks() const {
-    return all_frameworks_;
-  }
-  const UniqueVector<std::string>& all_weak_frameworks() const {
-    return all_weak_frameworks_;
-  }
-
-  const TargetSet& recursive_hard_deps() const { return recursive_hard_deps_; }
 
   std::vector<LabelPattern>& friends() { return friends_; }
   const std::vector<LabelPattern>& friends() const { return friends_; }
@@ -416,7 +345,7 @@ class Target : public Item {
   // action or a copy step, and the output library or executable file(s) from
   // binary targets.
   //
-  // It will NOT include stamp files and object files.
+  // It will NOT include phony targets or object files.
   const std::vector<OutputFile>& computed_outputs() const {
     return computed_outputs_;
   }
@@ -429,14 +358,51 @@ class Target : public Item {
   // a dependency on this one. It could be the same as the link output file
   // (this will be the case for static libraries). For shared libraries it
   // could be the same or different than the link output file, depending on the
-  // system. For actions this will be the stamp file.
+  // system.
+  //
+  // The dependency output alias is only set when the target does not have an
+  // output file and is using a Ninja phony target to represent it. The
+  // exception to this is for phony targets without any real inputs. Ninja
+  // treats empty phony targets as always dirty, so no other targets should
+  // depend on that target. In that scenario, both dependency_output_alias or
+  // dependency_output_file will be empty.
+  //
+  // Callers that do not care whether the dependency is represented by a file or
+  // an alias should use dependency_output().
   //
   // These are only known once the target is resolved and will be empty before
   // that. This is a cache of the files to prevent every target that depends on
   // a given library from recomputing the same pattern.
   const OutputFile& link_output_file() const { return link_output_file_; }
+
+  // Returns true if there is an output dependency file or phony alias.
+  bool has_dependency_output() const {
+    return has_dependency_output_file() || has_dependency_output_alias();
+  }
+  // Return the output dependency file path or phony alias if one is defined,
+  // or an empty string otherwise.
+  const OutputFile& dependency_output() const {
+    return has_dependency_output_file() ? dependency_output_file_
+                                        : dependency_output_alias_;
+  }
+
+  // Return true if there is a dependency file path defined for this target.
+  bool has_dependency_output_file() const {
+    return !dependency_output_file_.value().empty();
+  }
+  // Return the dependency output file path for this target if defined, or
+  // an empty string otherwise.
   const OutputFile& dependency_output_file() const {
     return dependency_output_file_;
+  }
+
+  // Return true if there is a dependency output alias defined for this target.
+  bool has_dependency_output_alias() const {
+    return !dependency_output_alias_.value().empty();
+  }
+  // Return the dependency output alias if any, or an empty string otherwise.
+  const OutputFile& dependency_output_alias() const {
+    return dependency_output_alias_;
   }
 
   // The subset of computed_outputs that are considered runtime outputs.
@@ -462,6 +428,11 @@ class Target : public Item {
   // The |loc_for_error| is used to blame a location for any errors produced. It
   // can be empty if there is no range (like this is being called based on the
   // command-line.
+  //
+  // It is possible for |outputs| to be returned empty without an error being
+  // reported. This can occur when the output type will result in a phony alias
+  // target (like a source_set) that is omitted from build files when they have
+  // no real inputs.
   bool GetOutputsAsSourceFiles(const LocationRange& loc_for_error,
                                bool build_complete,
                                std::vector<SourceFile>* outputs,
@@ -489,6 +460,7 @@ class Target : public Item {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(TargetTest, ResolvePrecompiledHeaders);
+  FRIEND_TEST_ALL_PREFIXES(TargetTest, HasRealInputs);
 
   // Pulls necessary information from dependencies to this one when all
   // dependencies have been resolved.
@@ -497,6 +469,11 @@ class Target : public Item {
   void PullDependentTargetLibs();
   void PullRecursiveHardDeps();
   void PullRecursiveBundleData();
+
+  // Checks to see whether this target or any of its dependencies have real
+  // inputs. If not, this target should be omitted as a dependency. This check
+  // only applies to targets that will result in a phony rule.
+  bool HasRealInputs() const;
 
   // Fills the link and dependency output files when a target is resolved.
   bool FillOutputFiles(Err* err);
@@ -522,53 +499,26 @@ class Target : public Item {
   bool output_extension_set_ = false;
 
   FileList sources_;
-  std::vector<SourceDir> include_dirs_;
   SourceFileTypeSet source_types_used_;
   bool all_headers_public_ = true;
   FileList public_headers_;
   bool check_includes_ = true;
   bool complete_static_lib_ = false;
-  bool copy_linkable_file_ = false;
   std::vector<std::string> data_;
   std::unique_ptr<BundleData> bundle_data_;
   OutputFile write_runtime_deps_output_;
 
-  LabelTargetVector whole_archive_deps_;
-  LabelTargetVector no_whole_archive_deps_;
   LabelTargetVector private_deps_;
   LabelTargetVector public_deps_;
   LabelTargetVector data_deps_;
   LabelTargetVector gen_deps_;
 
   // See getters for more info.
-  UniqueVector<LabelConfigPair> own_configs_;
-  UniqueVector<LabelConfigPair> own_all_dependent_configs_;
-  UniqueVector<LabelConfigPair> own_public_configs_;
-
   UniqueVector<LabelConfigPair> configs_;
   UniqueVector<LabelConfigPair> all_dependent_configs_;
   UniqueVector<LabelConfigPair> public_configs_;
 
   std::set<Label> allow_circular_includes_from_;
-
-  // Static libraries, shared libraries, and source sets from transitive deps
-  // that need to be linked.
-  InheritedLibraries inherited_libraries_;
-
-  // These libs and dirs are inherited from statically linked deps and all
-  // configs applying to this target.
-  UniqueVector<SourceDir> all_lib_dirs_;
-  UniqueVector<LibFile> all_libs_;
-
-  // These frameworks and dirs are inherited from statically linked deps and
-  // all configs applying to this target.
-  UniqueVector<SourceDir> all_framework_dirs_;
-  UniqueVector<std::string> all_frameworks_;
-  UniqueVector<std::string> all_weak_frameworks_;
-
-  // All hard deps from this target and all dependencies. Filled in when this
-  // target is marked resolved. This will not include the current target.
-  TargetSet recursive_hard_deps_;
 
   LabelPtrPair<Pool> pool_;
 
@@ -586,19 +536,6 @@ class Target : public Item {
   // Used for Rust targets.
   std::unique_ptr<RustValues> rust_values_;
 
-  // Used by all targets, only useful to generate Rust targets though. These
-  // present 2 different views of the public flags:
-  //
-  // Lists all transitive libraries, and for each one the public bit says if
-  // there is a public chain such that this target can make direct use of the
-  // lib. For each library marked public: "I have access to these targets."
-  InheritedLibraries rust_transitive_inherited_libs_;
-  // Lists all transitive libraries, and for each one the public bit says if a
-  // target depending on this target would inherit the libraries as public too.
-  // For each library marked public: "If you depend on me, you get access to
-  // these targets."
-  InheritedLibraries rust_transitive_inheritable_libs_;
-
   // User for Swift targets.
   std::unique_ptr<SwiftValues> swift_values_;
 
@@ -609,6 +546,7 @@ class Target : public Item {
   std::vector<OutputFile> computed_outputs_;
   OutputFile link_output_file_;
   OutputFile dependency_output_file_;
+  OutputFile dependency_output_alias_;
   std::vector<OutputFile> runtime_outputs_;
 
   std::unique_ptr<Metadata> metadata_;

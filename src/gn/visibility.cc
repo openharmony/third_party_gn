@@ -11,13 +11,8 @@
 #include "base/values.h"
 #include "gn/err.h"
 #include "gn/filesystem_utils.h"
-#include "gn/graph/include/module.h"
-#include "gn/graph/include/node.h"
 #include "gn/item.h"
 #include "gn/label.h"
-#include "gn/ohos_components.h"
-#include "gn/ohos_components_checker.h"
-#include "gn/precise/precise.h"
 #include "gn/scope.h"
 #include "gn/value.h"
 #include "gn/variables.h"
@@ -93,69 +88,28 @@ std::unique_ptr<base::Value> Visibility::AsValue() const {
 }
 
 // static
-bool Visibility::CheckItemVisibility(const Item *from, const Item *to, bool is_external_deps, Err *err) {
-    std::string to_label = to->label().GetUserVisibleName(false);
-    std::string from_label = from->label().GetUserVisibleName(false);
-    if (!to->visibility().CanSeeMe(from->label())) {
-        *err = Err(from->defined_from(), "Dependency not allowed.",
-            "The item " + from->label().GetUserVisibleName(false) +
-            "\n"
-            "can not depend on " +
-            to_label +
-            "\n"
-            "because it is not in " +
-            to_label + "'s visibility list: " + to->visibility().Describe(0, true));
-        return false;
-    }
-    const OhosComponent *from_component = from->ohos_component();
-    const OhosComponent *to_component = to->ohos_component();
-
-    PreciseManager* preciseManager = PreciseManager::GetInstance();
-    if (preciseManager != nullptr) {
-        Node *fromNode = preciseManager->GetModule(from_label);
-        if (!fromNode) {
-          fromNode = new Module(from_label, from_label, from);
-        }
-        Node *toNode = preciseManager->GetModule(to_label);
-        if (!toNode) {
-          toNode = new Module(to_label, to_label, to);
-        }
-        fromNode->AddTo(toNode);
-        toNode->AddFrom(fromNode);
-        preciseManager->AddModule(from_label, fromNode);
-        preciseManager->AddModule(to_label, toNode);
-    }
-
-    if ((from_component == nullptr) || (to_component == nullptr)) {
-        return true;
-    }
-    if (to_component->name() == "build_framework") {
-        return true;
-    }
-    if (from_component->name() == "build_framework") {
-        return true;
-    }
-
-    OhosComponentChecker *checker = OhosComponentChecker::getInstance();
-    if (checker == nullptr) {
-        return true;
-    }
-
-    if (from_component != to_component) {
-        if (!checker->CheckInnerApiNotLib(to, to_component, from_label, to_label, err) ||
-            !checker->CheckInnerApiNotDeclare(to, to_component, to_label, err) ||
-            !checker->CheckTargetAbsoluteDepsOther(from, to_component, from_label, to_label, is_external_deps, err) ||
-            !checker->CheckInnerApiVisibilityDenied(from, to_component, from_label, to_label, err) ||
-            !checker->CheckDepsComponentNotDeclare(from, to, from_label, to_label, is_external_deps, err)) {
-            return false;
-        }
-    } else {
-        if (!checker->CheckExternalDepsInner(to, to_component, from_label, to_label, is_external_deps, err)) {
-            return false;
-        }
-    }
-
-    return true;
+bool Visibility::CheckItemVisibility(const Item* from,
+                                     const Item* to,
+                                     Err* err) {
+  if (!to->visibility().CanSeeMe(from->label())) {
+    bool with_toolchain = from->settings()->ShouldShowToolchain({
+        &to->label(),
+        &from->label(),
+    });
+    std::string to_label = to->label().GetUserVisibleName(with_toolchain);
+    std::string from_label = from->label().GetUserVisibleName(with_toolchain);
+    *err = Err(from->defined_from(), "Dependency not allowed.",
+               "The item " + from_label +
+                   "\n"
+                   "can not depend on " +
+                   to_label +
+                   "\n"
+                   "because it is not in " +
+                   to_label +
+                   "'s visibility list: " + to->visibility().Describe(0, true));
+    return false;
+  }
+  return true;
 }
 
 // static

@@ -22,14 +22,10 @@
 #include "gn/commands.h"
 #include "gn/exec_process.h"
 #include "gn/filesystem_utils.h"
-#include "gn/graph/include/graph.h"
-#include "gn/innerapis_publicinfo_generator.h"
 #include "gn/input_file.h"
 #include "gn/label_pattern.h"
-#include "gn/ohos_components_checker.h"
 #include "gn/parse_tree.h"
 #include "gn/parser.h"
-#include "gn/precise/precise.h"
 #include "gn/source_dir.h"
 #include "gn/source_file.h"
 #include "gn/standard_out.h"
@@ -206,21 +202,11 @@ Variables
       When set specifies the minimum required version of Ninja. The default
       required version is 1.7.2. Specifying a higher version might enable the
       use of some of newer features that can make the build more efficient.
-  
-  ohos_components_support [optional]
-        This parameter enable support for OpenHarmony components.
-        When enabled, gn will load components information from "build_configs/"
-        directory in the root_out_directory.
 
-  The following files will be loaded:
-      out/build_configs/parts_info/inner_kits_info.json (required):
-        Required InnerAPI information file for each OHOS component.
-      out/build_configs/component_override_map.json (optional):
-        Optional overrided component maps file.
-
-  For OpenHarmony system build, this value must be enabled to support
-    external_deps (see "gn help external_deps") and public_external_deps
-    (see "gn help public_external_deps").
+  no_stamp_files [optional]
+      A boolean flag that can be set to generate Ninja files that use phony
+      rules instead of stamp files whenever possible. This results in smaller
+      Ninja build plans, but requires at least Ninja 1.11.
 
 Example .gn file contents
 
@@ -440,62 +426,6 @@ bool Setup::DoSetup(const std::string& build_dir,
   return true;
 }
 
-bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
-{
-  // Load OpenHarmony system components definition file.
-  const Value *support =
-      dotfile_scope_.GetValue("ohos_components_support", true);
-  build_settings_.set_ohos_components_support(support && support->boolean_value());
-  const Value *independent = build_settings_.build_args().GetArgOverride("ohos_indep_compiler_enable");
-  const Value *product = build_settings_.build_args().GetArgOverride("product_name");
-  const Value* special_parts_scan_switch = build_settings_.build_args().GetArgOverride("special_parts_scan_switch");
-  bool special_parts_switch = false;
-  if (special_parts_scan_switch && special_parts_scan_switch->type() == Value::BOOLEAN) {
-      special_parts_switch = special_parts_scan_switch->boolean_value();
-  }
-  if (!ohos_components_.LoadOhosComponents(build_dir, support, independent, product, special_parts_switch, err)) {
-    return false;
-  }
-
-  if (ohos_components_.isOhosComponentsLoaded()) {
-    build_settings_.SetOhosComponentsInfo(&ohos_components_);
-  }
-
-  const Value* checkType = build_settings_.build_args().GetArgOverride("ohos_components_checktype");
-  const Value* ruleSwitch = build_settings_.build_args().GetArgOverride("ohos_interception_rule_switch");
-  if (ruleSwitch && ruleSwitch->type() == Value::INTEGER) {
-    if (checkType && checkType->type() == Value::INTEGER) {
-      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value(), ruleSwitch->int_value());
-    } else {
-      ohos_components_.LoadOhosComponentsChecker(build_dir, support,
-          OhosComponentChecker::CheckType::INTERCEPT_IGNORE_TEST, ruleSwitch->int_value());
-    }
-  } else {
-    if (checkType && checkType->type() == Value::INTEGER) {
-      const unsigned int INTERCEPT_ALL_RULE = (1 << (OhosComponentChecker::BinaryLeftShift::ALL - 1)) - 1;
-      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value(), INTERCEPT_ALL_RULE);
-    } else {
-      ohos_components_.LoadOhosComponentsChecker(build_dir, support, OhosComponentChecker::CheckType::NONE,
-          OhosComponentChecker::BinaryLeftShift::UNKNOWN);
-    }
-  }
-  if (independent) {
-      ohos_components_.LoadOhosComponentsMapping(build_dir, support, independent);
-  }
-
-  const Value* preciseEnable = build_settings_.build_args().GetArgOverride("ohos_module_precise_build");
-  if (preciseEnable && preciseEnable->boolean_value()) {
-    const Value* preciseConfig = build_settings_.build_args().GetArgOverride("ohos_precise_config");
-    PreciseManager::Init(build_dir, preciseConfig);
-  }
-
-  const Value* graphEnable = build_settings_.build_args().GetArgOverride("ohos_graph_enable");
-  if (graphEnable && graphEnable->boolean_value()) {
-    Graph::Init(build_dir);
-  }
-  return true;
-}
-
 bool Setup::DoSetupWithErr(const std::string& build_dir,
                            bool force_create,
                            const base::CommandLine& cmdline,
@@ -530,11 +460,6 @@ bool Setup::DoSetupWithErr(const std::string& build_dir,
     if (!FillArguments(cmdline, err))
       return false;
   }
-  
-  if (!FillOhosComponentsInfo(build_dir, err)) {
-    return false;
-  }
-
   if (!FillPythonPath(cmdline, err))
     return false;
 
@@ -613,24 +538,6 @@ bool Setup::RunPostMessageLoop(const base::CommandLine& cmdline) {
   if (cmdline.HasSwitch(switches::kTracelog))
     SaveTraces(cmdline.GetSwitchValuePath(switches::kTracelog));
 
-  Err result;
-  InnerApiPublicInfoGenerator* instance = InnerApiPublicInfoGenerator::getInstance();
-  if (instance != nullptr) {
-    if (!instance->GeneratedInnerapiPublicInfo(builder_.GetAllResolvedTargets(), &result)) {
-      result.PrintToStdout();
-      return false;
-    }
-  }
-
-  PreciseManager* preciseManager = PreciseManager::GetInstance();
-  if (preciseManager != nullptr) {
-      preciseManager->GeneratPreciseTargets();
-  }
-
-  Graph* graph = Graph::GetInstance();
-  if (graph != nullptr) {
-    graph->GenGraph(builder_.GetAllResolvedItems());
-  }
   return true;
 }
 
@@ -719,7 +626,7 @@ bool Setup::FillArgsFromArgsInputFile(Err* err) {
   arg_scope.GetCurrentScopeValues(&overrides);
   build_settings_.build_args().AddArgOverrides(overrides);
   build_settings_.build_args().set_build_args_dependency_files(
-      arg_scope.build_dependency_files());
+      arg_scope.CollectBuildDependencyFiles());
   return true;
 }
 
@@ -1232,8 +1139,6 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline, Err* err) {
       return false;
     }
     build_settings_.set_no_stamp_files(no_stamp_files_value->boolean_value());
-    CHECK(!build_settings_.no_stamp_files())
-        << "no_stamp_files does not work yet!";
   }
 
   // Export compile commands.

@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <algorithm>
+
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -14,6 +16,7 @@
 #include "gn/deps_iterator.h"
 #include "gn/filesystem_utils.h"
 #include "gn/functions.h"
+#include "gn/rust_tool.h"
 #include "gn/scheduler.h"
 #include "gn/substitution_writer.h"
 #include "gn/tool.h"
@@ -483,8 +486,6 @@ bool Target::OnResolved(Err* err) {
                              dep.ptr->public_configs().end());
   }
 
-  
-
   PullRecursiveBundleData();
   if (!ResolvePrecompiledHeaders(err))
     return false;
@@ -525,9 +526,6 @@ bool Target::IsBinary() const {
 }
 
 bool Target::IsLinkable() const {
-  if (output_type_ == COPY_FILES) {
-    return copy_linkable_file();
-  }
   return output_type_ == STATIC_LIBRARY || output_type_ == SHARED_LIBRARY ||
          output_type_ == RUST_LIBRARY || output_type_ == RUST_PROC_MACRO;
 }
@@ -580,7 +578,7 @@ std::string Target::GetComputedOutputName() const {
   if (tool) {
     // Only add the prefix if the name doesn't already have it and it's not
     // being overridden.
-    if (!output_prefix_override_ && !base::starts_with(name, tool->output_prefix()))
+    if (!output_prefix_override_ && !name.starts_with(tool->output_prefix()))
       result = tool->output_prefix();
   }
   result.append(name);
@@ -634,8 +632,7 @@ bool Target::GetOutputsAsSourceFiles(const LocationRange& loc_for_error,
     if (!bundle_data().GetOutputsAsSourceFiles(settings(), this, outputs, err))
       return false;
   } else if (IsBinary() && output_type() != Target::SOURCE_SET) {
-    // Binary target with normal outputs (source sets have stamp outputs like
-    // groups).
+    // Binary target with normal outputs (source sets have phony targets).
     DCHECK(IsBinary()) << static_cast<int>(output_type());
     if (!build_complete) {
       // Can't access the toolchain for a target before the build is complete.
@@ -655,15 +652,20 @@ bool Target::GetOutputsAsSourceFiles(const LocationRange& loc_for_error,
           output_file.AsSourceFile(settings()->build_settings()));
     }
   } else {
-    // Everything else (like a group or bundle_data) has a stamp output. The
-    // dependency output file should have computed what this is. This won't be
+    // Everything else (like a group or bundle_data) has a phony output. The
+    // dependency output phony should have computed what this is. This won't be
     // valid unless the build is complete.
     if (!build_complete) {
       *err = Err(loc_for_error, kBuildIncompleteMsg);
       return false;
     }
-    outputs->push_back(
-        dependency_output_file().AsSourceFile(settings()->build_settings()));
+
+    // The dependency output might be empty if there is no output file or a
+    // phony alias for a set of inputs.
+    if (has_dependency_output()) {
+      outputs->push_back(
+          dependency_output().AsSourceFile(settings()->build_settings()));
+    }
   }
   return true;
 }
@@ -749,157 +751,6 @@ void Target::PullDependentTargetConfigs() {
   }
 }
 
-
-void Target::PullDependentTargetLibsFrom(const Target* dep, bool is_public) {
-  // Direct dependent libraries.
-  if (dep->output_type() == STATIC_LIBRARY ||
-      dep->output_type() == SHARED_LIBRARY ||
-      dep->output_type() == RUST_LIBRARY ||
-      dep->output_type() == SOURCE_SET ||
-      (dep->output_type() == CREATE_BUNDLE &&
-       dep->bundle_data().is_framework()) ||
-      (dep->output_type() == COPY_FILES &&
-       dep->copy_linkable_file())) {
-    inherited_libraries_.Append(dep, is_public);
-  }
-
-  // Collect Rust libraries that are accessible from the current target, or
-  // transitively part of the current target.
-  if (dep->output_type() == STATIC_LIBRARY ||
-      dep->output_type() == SHARED_LIBRARY ||
-      dep->output_type() == SOURCE_SET || dep->output_type() == RUST_LIBRARY ||
-      dep->output_type() == GROUP ||
-      (dep->output_type() == COPY_FILES &&
-       dep->copy_linkable_file())) {
-    // Here we have: `this` --[depends-on]--> `dep`
-    //
-    // The `this` target has direct access to `dep` since its a direct
-    // dependency, regardless of the edge being a public_dep or not, so we pass
-    // true for public-ness. Whereas, anything depending on `this` can only gain
-    // direct access to `dep` if the edge between `this` and `dep` is public, so
-    // we pass `is_public`.
-    //
-    // TODO(danakj): We should only need to track Rust rlibs or dylibs here, as
-    // it's used for passing to rustc with --extern. We currently track
-    // everything then drop non-Rust libs in ninja_rust_binary_target_writer.cc.
-    rust_transitive_inherited_libs_.Append(dep, true);
-    rust_transitive_inheritable_libs_.Append(dep, is_public);
-
-    rust_transitive_inherited_libs_.AppendInherited(
-        dep->rust_transitive_inheritable_libs(), true);
-    rust_transitive_inheritable_libs_.AppendInherited(
-        dep->rust_transitive_inheritable_libs(), is_public);
-  } else if (dep->output_type() == RUST_PROC_MACRO) {
-    // Proc-macros are inherited as a transitive dependency, but the things they
-    // depend on can't be used elsewhere, as the proc macro is not linked into
-    // the target (as it's only used during compilation).
-    rust_transitive_inherited_libs_.Append(dep, true);
-    rust_transitive_inheritable_libs_.Append(dep, is_public);
-  }
-
-  if ((dep->output_type() == SHARED_LIBRARY) ||
-      (dep->output_type() == COPY_FILES &&
-       dep->copy_linkable_file())) {
-    // Shared library dependendencies are inherited across public shared
-    // library boundaries.
-    //
-    // In this case:
-    //   EXE -> INTERMEDIATE_SHLIB --[public]--> FINAL_SHLIB
-    // The EXE will also link to to FINAL_SHLIB. The public dependency means
-    // that the EXE can use the headers in FINAL_SHLIB so the FINAL_SHLIB
-    // will need to appear on EXE's link line.
-    //
-    // However, if the dependency is private:
-    //   EXE -> INTERMEDIATE_SHLIB --[private]--> FINAL_SHLIB
-    // the dependency will not be propagated because INTERMEDIATE_SHLIB is
-    // not granting permission to call functions from FINAL_SHLIB. If EXE
-    // wants to use functions (and link to) FINAL_SHLIB, it will need to do
-    // so explicitly.
-    //
-    // Static libraries and source sets aren't inherited across shared
-    // library boundaries because they will be linked into the shared
-    // library. Rust dylib deps are handled above and transitive deps are
-    // resolved by the compiler.
-    inherited_libraries_.AppendPublicSharedLibraries(dep->inherited_libraries(),
-                                                     is_public);
-  } else {
-    InheritedLibraries transitive;
-
-    if (!dep->IsFinal()) {
-      // The current target isn't linked, so propagate linked deps and
-      // libraries up the dependency tree.
-      for (const auto& [inherited, inherited_is_public] :
-           dep->inherited_libraries().GetOrderedAndPublicFlag()) {
-        transitive.Append(inherited, is_public && inherited_is_public);
-      }
-    } else if (dep->complete_static_lib()) {
-      // Inherit only final targets through _complete_ static libraries.
-      //
-      // Inherited final libraries aren't linked into complete static libraries.
-      // They are forwarded here so that targets that depend on complete
-      // static libraries can link them in. Conversely, since complete static
-      // libraries link in non-final targets they shouldn't be inherited.
-      for (const auto& [inherited, inherited_is_public] :
-           dep->inherited_libraries().GetOrderedAndPublicFlag()) {
-        if (inherited->IsFinal()) {
-          transitive.Append(inherited, is_public && inherited_is_public);
-        }
-      }
-    }
-
-    for (const auto& [target, pub] : transitive.GetOrderedAndPublicFlag()) {
-      // Proc macros are not linked into targets that depend on them, so do not
-      // get inherited; they are consumed by the Rust compiler and only need to
-      // be specified in --extern.
-      if (target->output_type() != RUST_PROC_MACRO) {
-        inherited_libraries_.Append(target, pub);
-      }
-    }
-  }
-
-  // Library settings are always inherited across static library boundaries.
-  if (!dep->IsFinal() || dep->output_type() == STATIC_LIBRARY) {
-    all_lib_dirs_.Append(dep->all_lib_dirs());
-    all_libs_.Append(dep->all_libs());
-
-    all_framework_dirs_.Append(dep->all_framework_dirs());
-    all_frameworks_.Append(dep->all_frameworks());
-    all_weak_frameworks_.Append(dep->all_weak_frameworks());
-  }
-}
-
-void Target::PullDependentTargetLibs() {
-  for (const auto& dep : public_deps_)
-    PullDependentTargetLibsFrom(dep.ptr, true);
-  for (const auto& dep : private_deps_)
-    PullDependentTargetLibsFrom(dep.ptr, false);
-}
-
-void Target::PullRecursiveHardDeps() {
-  for (const auto& pair : GetDeps(DEPS_LINKED)) {
-    // Direct hard dependencies.
-    if (hard_dep() || pair.ptr->hard_dep()) {
-      recursive_hard_deps_.insert(pair.ptr);
-      continue;
-    }
-
-    // If |pair.ptr| is binary target and |pair.ptr| has no public header,
-    // |this| target does not need to have |pair.ptr|'s hard_deps as its
-    // hard_deps to start compiles earlier. Unless the target compiles a
-    // Swift module (since they also generate a header that can be used
-    // by the current target).
-    if (pair.ptr->IsBinary() && !pair.ptr->all_headers_public() &&
-        pair.ptr->public_headers().empty() &&
-        !pair.ptr->builds_swift_module()) {
-      continue;
-    }
-
-    // Recursive hard dependencies of all dependencies.
-    recursive_hard_deps_.insert(pair.ptr->recursive_hard_deps().begin(),
-                                pair.ptr->recursive_hard_deps().end());
-  }
-}
-
 void Target::PullRecursiveBundleData() {
   const bool is_create_bundle = output_type_ == CREATE_BUNDLE;
   for (const auto& pair : GetDeps(DEPS_LINKED)) {
@@ -929,27 +780,79 @@ void Target::PullRecursiveBundleData() {
     bundle_data().OnTargetResolved(this);
 }
 
+bool Target::HasRealInputs() const {
+  // This check is only necessary if this target will result in a phony target.
+  // Phony targets with no real inputs are treated as always dirty.
+
+  // Actions and generated_file always have at least one input file: the script
+  // used to execute the action or generated file itself. As such, they will
+  // never have an input-less phony target. We check this first to elide the
+  // common checks.
+  if (output_type() == ACTION || output_type() == ACTION_FOREACH ||
+      output_type() == GENERATED_FILE) {
+    return true;
+  }
+
+  // If any of this target's dependencies is non-phony target or a phony target
+  // with real inputs, then this target should be considered to have inputs.
+  for (const auto& pair : GetDeps(DEPS_ALL)) {
+    if (pair.ptr->has_dependency_output()) {
+      return true;
+    }
+  }
+
+  if (output_type() == BUNDLE_DATA) {
+    return !sources().empty();
+  }
+  if (output_type() == CREATE_BUNDLE) {
+    // CREATE_BUNDLE targets pick up most of their inputs in the form of
+    // dependencies on bundle_data targets, which were checked above when
+    // looping through GetDeps. This code handles the remaining possible
+    // CREATE_BUNDLE inputs.
+    return !bundle_data().assets_catalog_sources().empty() ||
+           !bundle_data().partial_info_plist().is_null() ||
+           !bundle_data().post_processing_script().is_null();
+  }
+
+  // If any of this target's sources will result in output files, then this
+  // target should be considered to have real inputs.
+  std::vector<OutputFile> tool_outputs;
+  return std::any_of(
+      sources().begin(), sources().end(), [&, this](const auto& source) {
+        const char* tool_name = Tool::kToolNone;
+        return GetOutputFilesForSource(source, &tool_name, &tool_outputs);
+      });
+}
+
 bool Target::FillOutputFiles(Err* err) {
   const Tool* tool = toolchain_->GetToolForTargetFinalOutput(this);
   bool check_tool_outputs = false;
   switch (output_type_) {
-    case GROUP:
-    case BUNDLE_DATA:
-    case CREATE_BUNDLE:
-    case SOURCE_SET:
-    case COPY_FILES:
     case ACTION:
     case ACTION_FOREACH:
-    case GENERATED_FILE: {
-      // These don't get linked to and use stamps which should be the first
-      // entry in the outputs. These stamps are named
-      // "<target_out_dir>/<targetname>.stamp". Setting "output_name" does not
-      // affect the stamp file name: it is always based on the original target
-      // name.
-      dependency_output_file_ =
-          GetBuildDirForTargetAsOutputFile(this, BuildDirType::OBJ);
-      dependency_output_file_.value().append(label().name());
-      dependency_output_file_.value().append(".stamp");
+    case BUNDLE_DATA:
+    case COPY_FILES:
+    case CREATE_BUNDLE:
+    case GENERATED_FILE:
+    case GROUP:
+    case SOURCE_SET: {
+      if (settings()->build_settings()->no_stamp_files()) {
+        if (HasRealInputs()) {
+          dependency_output_alias_ =
+              GetBuildDirForTargetAsOutputFile(this, BuildDirType::PHONY);
+          dependency_output_alias_.value().append(label().name());
+        }
+      } else {
+        // These don't get linked to and use stamps which should be the first
+        // entry in the outputs. These stamps are named
+        // "<target_out_dir>/<targetname>.stamp". Setting "output_name" does not
+        // affect the stamp file name: it is always based on the original target
+        // name.
+        dependency_output_file_ =
+            GetBuildDirForTargetAsOutputFile(this, BuildDirType::OBJ);
+        dependency_output_file_.value().append(label().name());
+        dependency_output_file_.value().append(".stamp");
+      }
       break;
     }
     case EXECUTABLE:
@@ -981,42 +884,56 @@ bool Target::FillOutputFiles(Err* err) {
               this, tool, tool->outputs().list()[0]);
       break;
     case RUST_PROC_MACRO:
-    case SHARED_LIBRARY:
+    case SHARED_LIBRARY: {
       CHECK(tool->outputs().list().size() >= 1);
       check_tool_outputs = true;
+
+      const SubstitutionPattern* link_output_ptr = nullptr;
+      const SubstitutionPattern* depend_output_ptr = nullptr;
+      const SubstitutionList* runtime_outputs_ptr = nullptr;
+
       if (const CTool* ctool = tool->AsC()) {
-        if (ctool->link_output().empty() && ctool->depend_output().empty()) {
-          // Default behavior, use the first output file for both.
-          link_output_file_ = dependency_output_file_ =
-              SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
-                  this, tool, tool->outputs().list()[0]);
-        } else {
-          // Use the tool-specified ones.
-          if (!ctool->link_output().empty()) {
-            link_output_file_ =
-                SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
-                    this, tool, ctool->link_output());
-          }
-          if (!ctool->depend_output().empty()) {
-            dependency_output_file_ =
-                SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
-                    this, tool, ctool->depend_output());
-          }
-        }
-        if (tool->runtime_outputs().list().empty()) {
-          // Default to the link output for the runtime output.
-          runtime_outputs_.push_back(link_output_file_);
-        } else {
-          SubstitutionWriter::ApplyListToLinkerAsOutputFile(
-              this, tool, tool->runtime_outputs(), &runtime_outputs_);
-        }
-      } else if (tool->AsRust()) {
+        link_output_ptr =
+            ctool->link_output().empty() ? nullptr : &ctool->link_output();
+        depend_output_ptr =
+            ctool->depend_output().empty() ? nullptr : &ctool->depend_output();
+        runtime_outputs_ptr = &ctool->runtime_outputs();
+      } else if (const RustTool* rust_tool = tool->AsRust()) {
+        link_output_ptr = rust_tool->link_output().empty()
+                              ? nullptr
+                              : &rust_tool->link_output();
+        depend_output_ptr = rust_tool->depend_output().empty()
+                                ? nullptr
+                                : &rust_tool->depend_output();
+        runtime_outputs_ptr = &rust_tool->runtime_outputs();
+      }
+
+      if (!link_output_ptr && !depend_output_ptr) {
         // Default behavior, use the first output file for both.
         link_output_file_ = dependency_output_file_ =
             SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
                 this, tool, tool->outputs().list()[0]);
+      } else {
+        if (link_output_ptr) {
+          link_output_file_ =
+              SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
+                  this, tool, *link_output_ptr);
+        }
+        if (depend_output_ptr) {
+          dependency_output_file_ =
+              SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
+                  this, tool, *depend_output_ptr);
+        }
+      }
+      if (!runtime_outputs_ptr || runtime_outputs_ptr->list().empty()) {
+        // Default to the link output for the runtime output.
+        runtime_outputs_.push_back(link_output_file_);
+      } else {
+        SubstitutionWriter::ApplyListToLinkerAsOutputFile(
+            this, tool, *runtime_outputs_ptr, &runtime_outputs_);
       }
       break;
+    }
     case UNKNOWN:
     default:
       NOTREACHED();
@@ -1050,11 +967,6 @@ bool Target::FillOutputFiles(Err* err) {
     for (const SourceFile& out : outputs_as_sources)
       computed_outputs_.push_back(
           OutputFile(settings()->build_settings(), out));
-  }
-
-  if ((output_type_ == COPY_FILES) && copy_linkable_file()) {
-    std::vector<OutputFile> tool_outputs;
-    link_output_file_ = computed_outputs()[0];
   }
 
   return true;
@@ -1126,7 +1038,7 @@ bool Target::ResolvePrecompiledHeaders(Err* err) {
 
 bool Target::CheckVisibility(Err* err) const {
   for (const auto& pair : GetDeps(DEPS_ALL)) {
-    if (!Visibility::CheckItemVisibility(this, pair.ptr, pair.is_external_deps, err))
+    if (!Visibility::CheckItemVisibility(this, pair.ptr, err))
       return false;
   }
   return true;
@@ -1135,7 +1047,7 @@ bool Target::CheckVisibility(Err* err) const {
 bool Target::CheckConfigVisibility(Err* err) const {
   for (ConfigValuesIterator iter(this); !iter.done(); iter.Next()) {
     if (const Config* config = iter.GetCurrentConfig())
-      if (!Visibility::CheckItemVisibility(this, config, false, err))
+      if (!Visibility::CheckItemVisibility(this, config, err))
         return false;
   }
   return true;
