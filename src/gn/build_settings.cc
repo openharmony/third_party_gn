@@ -8,7 +8,6 @@
 
 #include "base/files/file_util.h"
 #include "gn/filesystem_utils.h"
-#include "gn/ohos_components.h"
 
 BuildSettings::BuildSettings() = default;
 
@@ -80,78 +79,9 @@ void BuildSettings::ItemDefined(std::unique_ptr<Item> item) const {
     item_defined_callback_(std::move(item));
 }
 
-
-void BuildSettings::SetOhosComponentsInfo(OhosComponents *ohos_components)
-{
-  ohos_components_ = ohos_components;
-}
-
-bool BuildSettings::GetExternalDepsLabel(const Value& external_dep, std::string& label,
-  const Label& current_toolchain, int &whole_status, Err* err) const
-{
-  if (ohos_components_ == nullptr) {
-    *err = Err(external_dep, "You are using OpenHarmony external_deps, but no components information loaded.");
-    return false;
-  }
-  return ohos_components_->GetExternalDepsLabel(external_dep, label, current_toolchain, whole_status, err);
-}
-
-bool BuildSettings::GetPrivateDepsLabel(const Value& dep, std::string& label,
-  const Label& current_toolchain, int &whole_status, Err* err) const
-{
-  if (!is_ohos_components_enabled()) {
-    label = dep.string_value();
-    return true;
-  }
-  if (ohos_components_ == nullptr) {
-    *err = Err(dep, "Components information not loaded.");
-    return false;
-  }
-  return ohos_components_->GetPrivateDepsLabel(dep, label, current_toolchain, whole_status, err);
-}
-
-bool BuildSettings::is_ohos_components_enabled() const
-{
-  return ohos_components_support_;
-}
-
-const OhosComponent *BuildSettings::GetOhosComponent(const std::string& label) const
-{
-  if (ohos_components_ == nullptr) {
-    return nullptr;
-  }
-  return ohos_components_->GetComponentByLabel(label);
-}
-
-const OhosComponent *BuildSettings::GetOhosComponentByName(const std::string& component_name) const
-{
-    if (ohos_components_ == nullptr) {
-        return nullptr;
-    }
-    return ohos_components_->GetComponentByName(component_name);
-}
-
-// [OHOS] Resolve target label with OHOS component info
-bool BuildSettings::ResolveTargetLabelWithOhosComponent(const Value& arg, 
-                                                     const SourceDir& current_dir,
-                                                     const Label& toolchain_label,
-                                                     Label* label,
-                                                     Err* err) const
-{
-    if (arg.type() == Value::STRING) {
-        std::string target_label = arg.string_value();
-        if (!target_label.empty() && is_ohos_components_enabled()) {
-            const std::string& label_str = ohos_components_->getComponentLabel(target_label);
-            if (!label_str.empty()) {
-                const Value& value = Value(arg.origin(), label_str);
-                *label = Label::Resolve(current_dir, root_path_utf8(), toolchain_label, value, err);
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-bool BuildSettings::isOhosIndepCompilerEnable() const {
-    return ohos_components_ && ohos_components_->isOhosIndepCompilerEnable();
+const BuildSettings::PrintCallback BuildSettings::swap_print_callback(
+    const BuildSettings::PrintCallback callback) {
+  auto temp = std::move(print_callback_);
+  print_callback_ = callback;
+  return temp;
 }

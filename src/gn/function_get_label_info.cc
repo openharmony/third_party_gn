@@ -8,7 +8,6 @@
 #include "gn/label.h"
 #include "gn/parse_tree.h"
 #include "gn/value.h"
-#include "ohos_components.h"
 
 namespace functions {
 
@@ -76,7 +75,6 @@ Examples
   # Returns string "//out/Debug/gen/foo/bar".
 )*";
 
-
 Value RunGetLabelInfo(Scope* scope,
                       const FunctionCallNode* function,
                       const std::vector<Value>& args,
@@ -87,20 +85,10 @@ Value RunGetLabelInfo(Scope* scope,
   }
 
   // Resolve the requested label.
-  const BuildSettings* buildSettings = scope->settings()->build_settings();
-  Label label;
-  bool resolved = false;
-  // [OHOS] Resolve component info first using BuildSettings method
-  resolved = buildSettings->ResolveTargetLabelWithOhosComponent(args[0], 
-                                                             scope->GetSourceDir(),
-                                                             ToolchainLabelForScope(scope),
-                                                             &label,
-                                                             err);
-  
-  if (!resolved) {
-    label = Label::Resolve(scope->GetSourceDir(), buildSettings->root_path_utf8(),
-                         ToolchainLabelForScope(scope), args[0], err);
-  }
+  Label label =
+      Label::Resolve(scope->GetSourceDir(),
+                     scope->settings()->build_settings()->root_path_utf8(),
+                     ToolchainLabelForScope(scope), args[0], err);
   if (label.is_null())
     return Value();
 
