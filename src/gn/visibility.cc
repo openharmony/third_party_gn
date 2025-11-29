@@ -11,8 +11,11 @@
 #include "base/values.h"
 #include "gn/err.h"
 #include "gn/filesystem_utils.h"
+#include "gn/graph/include/module.h"
+#include "gn/graph/include/node.h"
 #include "gn/item.h"
 #include "gn/label.h"
+#include "gn/precise/precise.h"
 #include "gn/scope.h"
 #include "gn/value.h"
 #include "gn/variables.h"
@@ -91,13 +94,9 @@ std::unique_ptr<base::Value> Visibility::AsValue() const {
 bool Visibility::CheckItemVisibility(const Item* from,
                                      const Item* to,
                                      Err* err) {
+  std::string to_label = to->label().GetUserVisibleName(false);
+  std::string from_label = from->label().GetUserVisibleName(false);
   if (!to->visibility().CanSeeMe(from->label())) {
-    bool with_toolchain = from->settings()->ShouldShowToolchain({
-        &to->label(),
-        &from->label(),
-    });
-    std::string to_label = to->label().GetUserVisibleName(with_toolchain);
-    std::string from_label = from->label().GetUserVisibleName(with_toolchain);
     *err = Err(from->defined_from(), "Dependency not allowed.",
                "The item " + from_label +
                    "\n"
@@ -108,6 +107,21 @@ bool Visibility::CheckItemVisibility(const Item* from,
                    to_label +
                    "'s visibility list: " + to->visibility().Describe(0, true));
     return false;
+  }
+  PreciseManager* preciseManager = PreciseManager::GetInstance();
+  if (preciseManager != nullptr) {
+     Node *fromNode = preciseManager->GetModule(from_label);
+     if (!fromNode) {
+        fromNode = new Module(from_label, from_label, from);
+     }
+     Node *toNode = preciseManager->GetModule(to_label);
+     if (!toNode) {
+        toNode = new Module(to_label, to_label, to);
+     }
+     fromNode->AddTo(toNode);
+     toNode->AddFrom(fromNode);
+     preciseManager->AddModule(from_label, fromNode);
+     preciseManager->AddModule(to_label, toNode);
   }
   return true;
 }
