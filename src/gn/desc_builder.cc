@@ -428,12 +428,14 @@ class TargetDescBuilder : public BaseDescBuilder {
         !target_->configs().empty()) {
       auto configs = std::make_unique<base::ListValue>();
       FillInConfigVector(configs.get(), target_->configs().vector());
+      FillInConfigVector(configs.get(), target_->own_configs().vector());
       res->SetWithoutPathExpansion(variables::kConfigs, std::move(configs));
     }
 
     if (what(variables::kPublicConfigs) && !target_->public_configs().empty()) {
       auto configs = std::make_unique<base::ListValue>();
       FillInConfigVector(configs.get(), target_->public_configs());
+      FillInConfigVector(configs.get(), target_->own_public_configs());
       res->SetWithoutPathExpansion(variables::kPublicConfigs,
                                    std::move(configs));
     }
@@ -442,6 +444,7 @@ class TargetDescBuilder : public BaseDescBuilder {
         !target_->all_dependent_configs().empty()) {
       auto configs = std::make_unique<base::ListValue>();
       FillInConfigVector(configs.get(), target_->all_dependent_configs());
+      FillInConfigVector(configs.get(), target_->own_all_dependent_configs());
       res->SetWithoutPathExpansion(variables::kAllDependentConfigs,
                                    std::move(configs));
     }
