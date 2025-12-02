@@ -22,10 +22,12 @@
 #include "gn/commands.h"
 #include "gn/exec_process.h"
 #include "gn/filesystem_utils.h"
+#include "gn/graph/include/graph.h"
 #include "gn/input_file.h"
 #include "gn/label_pattern.h"
 #include "gn/parse_tree.h"
 #include "gn/parser.h"
+#include "gn/precise/precise.h"
 #include "gn/source_dir.h"
 #include "gn/source_file.h"
 #include "gn/standard_out.h"
@@ -426,6 +428,19 @@ bool Setup::DoSetup(const std::string& build_dir,
   return true;
 }
 
+bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
+{
+  const Value* preciseEnable = build_settings_.build_args().GetArgOverride("ohos_module_precise_build");
+  if (preciseEnable && preciseEnable->boolean_value()) {
+    const Value* preciseConfig = build_settings_.build_args().GetArgOverride("ohos_precise_config");
+    PreciseManager::Init(build_dir, preciseConfig);
+  }
+  const Value* graphEnable = build_settings_.build_args().GetArgOverride("ohos_graph_enable");
+  if (graphEnable && graphEnable->boolean_value()) {
+    Graph::Init(build_dir);
+  }
+  return true;
+}
 bool Setup::DoSetupWithErr(const std::string& build_dir,
                            bool force_create,
                            const base::CommandLine& cmdline,
@@ -459,6 +474,9 @@ bool Setup::DoSetupWithErr(const std::string& build_dir,
   if (fill_arguments_) {
     if (!FillArguments(cmdline, err))
       return false;
+  }
+  if (!FillOhosComponentsInfo(build_dir, err)) {
+    return false;
   }
   if (!FillPythonPath(cmdline, err))
     return false;
@@ -538,6 +556,14 @@ bool Setup::RunPostMessageLoop(const base::CommandLine& cmdline) {
   if (cmdline.HasSwitch(switches::kTracelog))
     SaveTraces(cmdline.GetSwitchValuePath(switches::kTracelog));
 
+  PreciseManager* preciseManager = PreciseManager::GetInstance();
+  if (preciseManager != nullptr) {
+      preciseManager->GeneratPreciseTargets();
+  }
+  Graph* graph = Graph::GetInstance();
+  if (graph != nullptr) {
+    graph->GenGraph(builder_.GetAllResolvedItems());
+  }
   return true;
 }
 
