@@ -24,6 +24,14 @@
 #include "gn/substitution_writer.h"
 #include "gn/target.h"
 #include "gn/value.h"
+struct ModuleCheckResult
+{
+    bool is_included;
+    bool is_excluded;
+    std::vector<std::string> cache_list;
+
+    ModuleCheckResult() : is_included(false), is_excluded(false) {}
+};
 
 class PreciseManager {
 public:
@@ -67,12 +75,15 @@ private:
     bool IsInMaxRange(const std::string& name);
     bool IsContainModifiedFiles(const std::string& file, bool isHFile);
     bool IsFirstRecord(const std::vector<std::string>& result, const std::string& name);
+    bool CheckActuallyUsedHeaders(const Item* item);
     bool IsTargetTypeMatch(const Item* item);
     bool IsTestOnlyMatch(const Item* item);
-    void PreciseSearch(const Node* node, std::vector<std::string>& result, std::vector<Module*>& module_list, std::vector<std::string>& log,
-        bool forGn, int depth, int maxDepth);
+    void PreciseSearch(const Node* node, std::vector<std::string>& result, std::vector<Module*>& module_list,
+         std::vector<std::string>& log, bool forGn, int depth, int maxDepth, bool isHeader);
     void WriteFile(const std::string& path, const std::string& info);
     void WritePreciseTargets(const std::vector<std::string>& result, const std::vector<std::string>& log);
+    ModuleCheckResult CheckModulePath(Module* module, const std::vector<std::string>& cache_list);
+    void ApplyTargetFilters(std::vector<std::string>& result, std::vector<Module*>& module_list);
     PreciseManager() {}
     PreciseManager(const std::string& outDir, const std::string& preciseConfig);
     PreciseManager &operator = (const PreciseManager &) = delete;

@@ -1,3 +1,7 @@
+// Copyright 2025 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "gn/graph/include/graph.h"
 
 #include <utility>
@@ -8,6 +12,8 @@
 #include "gn/config.h"
 #include "gn/filesystem_utils.h"
 #include "gn/target.h"
+#include "gn/ohos_components.h"
+#include "gn/standard_out.h"
 
 Graph* Graph::instance_ = nullptr;
 
@@ -222,13 +228,26 @@ std::vector<std::string> GetIndirectAllDependentConfigs(const Target* target) {
   return LabelConfigVectorToStringVector(target->own_all_dependent_configs());
 }
 
+std::map<std::string, std::string> GetComponentInfo(const Target* target) {
+  std::map<std::string, std::string> component_info;
+  const OhosComponent* component = target->ohos_component();
+  if (component != nullptr) {
+    component_info["component"] = component->name();
+    component_info["subsystem"] = component->subsystem();
+  } else {
+    component_info["component"] = "unknown";
+    component_info["subsystem"] = "unknown";
+  }
+  return component_info;
+}
+
 }  // namespace GraphHelper
 
 Graph::JsonNodeBuilder::JsonNodeBuilder(const Module& info) : info_(info) {}
 
 base::Value Graph::JsonNodeBuilder::BuildModules() {
   base::Value dict(base::Value::Type::DICTIONARY);
-  dict.SetKey("id", base::Value(info_.GetItem()->label().name()));
+  dict.SetKey("name", base::Value(info_.GetItem()->label().name()));
   dict.SetKey("label", base::Value(info_.GetName()));
   dict.SetKey("type", base::Value(GraphHelper::GetType(info_.GetItem())));
   dict.SetKey("path", base::Value(info_.GetPath()));
@@ -239,35 +258,45 @@ base::Value Graph::JsonNodeBuilder::BuildModules() {
   GraphHelper::SetKey("cflags_c", dict, GraphHelper::GetCflagsC(info_.GetItem()));
   GraphHelper::SetKey("cflags_cc", dict, GraphHelper::GetCflagsCC(info_.GetItem()));
   GraphHelper::SetKey("ldflags", dict, GraphHelper::GetLdflags(info_.GetItem()));
-  GraphHelper::SetKey("direct_configs", dict, GraphHelper::GetDirectConfigs(info_.GetItem()));
+  GraphHelper::SetKey("configs", dict, GraphHelper::GetDirectConfigs(info_.GetItem()));
 
   if (info_.GetItem()->GetItemTypeName() == "target") {
+    std::map<std::string, std::string> component_info =  GraphHelper::GetComponentInfo(info_.GetItem()->AsTarget());
+    dict.SetKey("component", base::Value(component_info["component"]));
+    dict.SetKey("subsystem", base::Value(component_info["subsystem"]));
+    dict.SetKey("output_name", base::Value(info_.GetItem()->AsTarget()->GetComputedOutputName()));
     GraphHelper::SetKey("public_headers", dict, GraphHelper::GetPublicHeaders(info_.GetItem()->AsTarget()));
-    GraphHelper::SetKey("private_deps", dict, GraphHelper::GetPrivateDeps(info_.GetItem()->AsTarget()));
+    GraphHelper::SetKey("deps", dict, GraphHelper::GetPrivateDeps(info_.GetItem()->AsTarget()));
     GraphHelper::SetKey("public_deps", dict, GraphHelper::GetPublicDeps(info_.GetItem()->AsTarget()));
-    GraphHelper::SetKey("direct_public_configs", dict, GraphHelper::GetDirectPublicConfigs(info_.GetItem()->AsTarget()));
-    GraphHelper::SetKey("direct_all_dependent_configs", dict, GraphHelper::GetDirectAllDependentConfigs(info_.GetItem()->AsTarget()));
+    GraphHelper::SetKey("public_configs", 
+      dict, GraphHelper::GetDirectPublicConfigs(info_.GetItem()->AsTarget()));
+    GraphHelper::SetKey("all_dependent_configs", 
+      dict, GraphHelper::GetDirectAllDependentConfigs(info_.GetItem()->AsTarget()));
     GraphHelper::SetKey("indirect_configs", dict, GraphHelper::GetIndirectConfigs(info_.GetItem()->AsTarget()));
-    GraphHelper::SetKey("indirect_public_configs", dict, GraphHelper::GetIndirectPublicConfigs(info_.GetItem()->AsTarget()));
-    GraphHelper::SetKey("indirect_all_dependent_configs", dict, GraphHelper::GetIndirectAllDependentConfigs(info_.GetItem()->AsTarget()));
+    GraphHelper::SetKey("indirect_public_configs", 
+      dict, GraphHelper::GetIndirectPublicConfigs(info_.GetItem()->AsTarget()));
+    GraphHelper::SetKey("indirect_all_dependent_configs", 
+      dict, GraphHelper::GetIndirectAllDependentConfigs(info_.GetItem()->AsTarget()));
   }
   return dict;
 }
 
-void Graph::DumpGraphToJsonFile(const std::vector<Module>& modules,
-                                const base::FilePath& output_path) {
+void Graph::DumpGraphToJsonFile(const std::vector<Module>& modules, const base::FilePath& output_path) {
   base::Value module_list(base::Value::Type::LIST);
+  OutputString("Handling modules...\n");
   for (const auto& module : modules) {
     Graph::JsonNodeBuilder builder(module);
     module_list.GetList().push_back(builder.BuildModules());
   }
-
+  OutputString("Total modules: " + std::to_string(modules.size()) + "\n");
   base::Value root(base::Value::Type::DICTIONARY);
   root.SetKey("modules", std::move(module_list));
 
   std::string output;
   base::JSONWriter::Write(root, &output);
+  OutputString("Writing file: " + FilePathToUTF8(output_path) + "\n");
   base::WriteFile(output_path, output.data(), static_cast<unsigned int>(output.size()));
+  OutputString("File written: " + FilePathToUTF8(output_path) + "\n");
 }
 
 void Graph::GenGraph(const std::vector<const Item*> items)

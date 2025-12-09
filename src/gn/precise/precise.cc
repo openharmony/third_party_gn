@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <regex>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -40,7 +42,8 @@ static std::vector<std::string> modifyGnFileList_;
 static std::vector<std::string> modifyGnModuleList_;
 static std::vector<std::string> ignoreList_;
 static std::vector<std::string> maxRangeList_;
-static std::unordered_set<std::string> rootTargets_;
+static std::unordered_set<std::string> includeParentTargets_;
+static std::unordered_set<std::string> excludeParentTargets_;
 static std::unordered_map<std::string, bool> filter_cache;
 
 static bool ReadFile(base::FilePath path, std::string& content)
@@ -144,10 +147,17 @@ static void LoadTargetTypeList(const base::Value& list)
     }
 }
 
-static void LoadRootTarget(const base::Value& list)
+static void LoadIncludeParentTargets(const base::Value& list)
 {
     for (const base::Value& value : list.GetList()) {
-        rootTargets_.insert(value.GetString());
+        includeParentTargets_.insert(value.GetString());
+    }
+}
+
+static void LoadExcludeParentTargets(const base::Value& list)
+{
+    for (const base::Value& value : list.GetList()) {
+        excludeParentTargets_.insert(value.GetString());
     }
 }
 
@@ -170,7 +180,8 @@ static std::map<std::string, std::function<void(const base::Value& value)>> conf
     { "modify_files_path", LoadModifyFilesPath },
     { "precise_result_path", LoadPreciseResultPath },
     { "precise_log_path", LoadPreciseLogPath },
-    { "root_target", LoadRootTarget }
+    { "include_parent_targets", LoadIncludeParentTargets },
+    { "exclude_parent_targets", LoadExcludeParentTargets }
 };
 
 static void LoadModifyList()
@@ -294,6 +305,59 @@ bool PreciseManager::IsContainModifiedFiles(const std::string& file, bool isHFil
         }
         return false;
     }
+}
+
+bool PreciseManager::CheckActuallyUsedHeaders(const Item* item)
+{
+    if (item == nullptr) {
+        return false;
+    }
+
+    const Target *target = item->AsTarget();
+    if (target == nullptr) {
+        return false;
+    }
+
+    const std::vector<SourceFile>& sources = target->sources();
+    const BuildSettings* build_settings = target->settings()->build_settings();
+
+    for (const SourceFile& sourceFile : sources) {
+        std::string filePath = sourceFile.value();
+
+        // 将 // 开头的相对路径转换为绝对路径
+        std::string absolutePath;
+        if (base::starts_with(filePath, "//")) {
+            // 去掉开头的 //，然后与构建目录的根路径拼接
+            std::string relativePath = filePath.substr(2);
+            absolutePath = build_settings->root_path().value() + "/" + relativePath;
+        } else {
+            absolutePath = filePath;
+        }
+
+        std::string content;
+        if (!ReadFile(base::FilePath(absolutePath), content)) {
+            continue;
+        }
+
+        // 检查源文件是否包含了modifyHFileList_中的任何头文件
+        for (const std::string& headerFile : modifyHFileList_) {
+            // 提取头文件名（去掉路径）
+            size_t lastSlash = headerFile.find_last_of("/");
+            std::string headerName = (lastSlash != std::string::npos) ?
+                                     headerFile.substr(lastSlash + 1) : headerFile;
+
+            // 检查是否包含该头文件（支持 #include "header.h" 和 #include <header.h>）
+            std::string includePattern1 = "#include \"" + headerName + "\"";
+            std::string includePattern2 = "#include <" + headerName + ">";
+
+            if (content.find(includePattern1) != std::string::npos ||
+                content.find(includePattern2) != std::string::npos) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 Node* PreciseManager::GetModule(const std::string& name)
@@ -425,7 +489,13 @@ void PreciseManager::WriteFile(const std::string& path, const std::string& info)
 
 bool PreciseManager::FilterType(const Item* item)
 {
-    if (item == nullptr || item->GetItemTypeName() == "config") {
+    if (item == nullptr || item->GetItemTypeName() != "target") {
+        return false;
+    }
+
+    Target::OutputType type = item->AsTarget()->output_type();
+    if (type != Target::SHARED_LIBRARY && type != Target::STATIC_LIBRARY && type != Target::RUST_LIBRARY &&
+        type != Target::EXECUTABLE && type != Target::SOURCE_SET && type != Target::RUST_PROC_MACRO) {
         return false;
     }
 
@@ -479,8 +549,9 @@ bool PreciseManager::IsFirstRecord(const std::vector<std::string>& result, const
     return false;
 }
 
-void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& result, std::vector<Module*>& module_list, std::vector<std::string>& log,
-    bool forGn, int depth, int maxDepth)
+void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& result, 
+    std::vector<Module*>& module_list, std::vector<std::string>& log, 
+    bool forGn, int depth, int maxDepth, bool isHeader)
 {
     Module* module = (Module* )node;
     const Item* item = module->GetItem();
@@ -497,6 +568,11 @@ void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& r
         return;
     }
 
+    if (isHeader && depth == 0 && !CheckActuallyUsedHeaders(item) ) {
+        log.push_back("SourcesIncludeModifiedHeaders false:" + name);
+        return;
+    }
+
     if (IsTargetTypeMatch(item) && IsTestOnlyMatch(item) && IsFirstRecord(result, name)
         && !IsIgnore(name) && IsInMaxRange(name)) {
         log.push_back("OK:" + name);
@@ -510,7 +586,7 @@ void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& r
         const Item* itemParent = moduleParent->GetItem();
         std::string nameParent = itemParent->label().GetUserVisibleName(false);
         log.push_back("Check Parent:" + nameParent + "->" + name);
-        PreciseSearch(parent, result, module_list, log, forGn, depth + 1, maxDepth);
+        PreciseSearch(parent, result, module_list, log, forGn, depth + 1, maxDepth, isHeader);
     }
 }
 
@@ -564,43 +640,88 @@ void PreciseManager::WritePreciseTargets(const std::vector<std::string>& result,
     WriteFile(preciseResultPath_, resultInfo);
 }
 
-bool CheckModuleRootTargets(Module* module, std::string origin_label, std::vector<std::string> cache_list)
+ModuleCheckResult PreciseManager::CheckModulePath(Module* module, const std::vector<std::string>& cache_list = {})
 {
+    ModuleCheckResult result;
+    result.cache_list = cache_list;
+
     if (module == nullptr) {
-        cache_list.clear();
-        return false;
+        result.cache_list.clear();
+        return result;
     }
-    
+
     std::string label = module->GetItem()->label().GetUserVisibleName(false);
-    if (rootTargets_.find(label) != rootTargets_.end() || filter_cache[label]) {
-        if (!cache_list.empty()) {
-            for (auto &label : cache_list) {
-                filter_cache[label] = true;
+
+    if (std::find(result.cache_list.begin(), result.cache_list.end(), label) != result.cache_list.end()) {
+        result.cache_list.clear();
+        return result;
+    }
+
+    if (excludeParentTargets_.find(label) != excludeParentTargets_.end()) {
+        result.is_excluded = true;
+        return result;
+    }
+
+    if (includeParentTargets_.find(label) != includeParentTargets_.end() || filter_cache[label]) {
+        result.is_included = true;
+        filter_cache[label] = true;
+        if (!result.cache_list.empty()) {
+            for (auto &cached_label : result.cache_list) {
+                filter_cache[cached_label] = true;
             }
         }
-        return true;
+        return result;
     }
-    cache_list.push_back(label);
+
+    result.cache_list.push_back(label);
     std::vector<Node*> from_list = module->GetFromList();
-    if (!from_list.empty()) {
-        for (Node* parent : module->GetFromList()) {
-            Module* moduleParent = (Module* )parent;
-            std::string parent_label = moduleParent->GetItem()->label().GetUserVisibleName(false);
-            return CheckModuleRootTargets(moduleParent, parent_label, cache_list);
-        }
+    if (from_list.empty()) {
+        return result;
     }
-    cache_list.clear();
-    return false;
+
+    for (Node* parent : module->GetFromList()) {
+        Module* moduleParent = (Module* )parent;
+        ModuleCheckResult parent_result = CheckModulePath(moduleParent, result.cache_list);
+        
+        result.is_included = parent_result.is_included;
+        result.is_excluded = parent_result.is_excluded;
+        if (!result.is_excluded && result.is_included) {
+            filter_cache[label] = true;
+            for (auto &cached_label : result.cache_list) {
+                    filter_cache[cached_label] = true;
+            }
+            return result;
+        } 
+        
+    }
+    
+    result.cache_list.clear();
+    filter_cache[label] = false;
+    return result;
 }
 
-void FilterWithRootTargets(std::vector<std::string>& result, std::vector<Module*>& module_list)
+void PreciseManager::ApplyTargetFilters(std::vector<std::string>& result, std::vector<Module*>& module_list)
 {
     for (int i = result.size() - 1; i >= 0; --i)
-    {   
+    {
         Module* module = module_list[i];
         std::string label = module->GetItem()->label().GetUserVisibleName(false);
-        if (!CheckModuleRootTargets(module, label, {})) {
-            std::cout << "Delete target not from root targets:" << result[i] << "(index:" << i << ")" << std::endl;
+
+        ModuleCheckResult checkResult = CheckModulePath(module, {});
+        bool should_keep = true;
+
+        if (checkResult.is_excluded) {
+            should_keep = false;
+            std::cout << 
+            "Delete target in exclude parent targets:" << result[i] << "(index:" << i << ")" << std::endl;
+        }
+        else if (!includeParentTargets_.empty() && !checkResult.is_included) {
+            should_keep = false;
+            std::cout << 
+            "Delete target not from include parent targets:" << result[i] << "(index:" << i << ")" << std::endl;
+        }
+
+        if (!should_keep) {
             result.erase(result.begin() + i);
             module_list.erase(module_list.begin() + i);
         }
@@ -626,23 +747,23 @@ void PreciseManager::GeneratPreciseTargets()
 
         if (CheckSourceInTarget(item)) {
             log.push_back("Hit C:");
-            PreciseSearch(pair.second, result, module_list, log, false, 0, cFileDepth_);
+            PreciseSearch(pair.second, result, module_list, log, false, 0, cFileDepth_, false);
         } else if (CheckIncludeInTarget(item) || CheckPrivateConfigs(item)
             || CheckPublicConfigs(item) || CheckAllDepConfigs(item)) {
             log.push_back("Hit H:");
-            PreciseSearch(pair.second, result, module_list, log, false, 0, hFileDepth_);
+            PreciseSearch(pair.second, result, module_list, log, false, 0, hFileDepth_, true);
         } else if (CheckModuleInGn(label)) {
             log.push_back("Hit GN:");
-            PreciseSearch(pair.second, result, module_list, log, true, 0, gnFileDepth_);
+            PreciseSearch(pair.second, result, module_list, log, true, 0, gnFileDepth_, false);
         } else if (CheckModuleMatch(label)) {
             log.push_back("Hit Module:");
-            PreciseSearch(pair.second, result, module_list, log, true, 0, gnModuleDepth_);
+            PreciseSearch(pair.second, result, module_list, log, true, 0, gnModuleDepth_, false);
         }
     }
-    if (!rootTargets_.empty()){
-        std::cout << "Module target count:" << result.size() << std::endl;
-        FilterWithRootTargets(result, module_list);
-        std::cout << "Module target count filtered by root targets:" << result.size() << std::endl;
-    }
+
+    std::cout << "Module target count before filtering:" << result.size() << std::endl;
+    ApplyTargetFilters(result, module_list);
+    std::cout << "Module target count after filtering:" << result.size() << std::endl;
+
     WritePreciseTargets(result, log);
 }
