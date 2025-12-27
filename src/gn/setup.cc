@@ -486,7 +486,7 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
   const Value* preciseEnable = build_settings_.build_args().GetArgOverride("ohos_module_precise_build");
   if (preciseEnable && preciseEnable->boolean_value()) {
     const Value* preciseConfig = build_settings_.build_args().GetArgOverride("ohos_precise_config");
-    PreciseManager::Init(build_dir, preciseConfig);
+    PreciseManager::Init(build_dir, build_settings_.root_path().value(), preciseConfig);
   }
 
   const Value* graphEnable = build_settings_.build_args().GetArgOverride("ohos_graph_enable");
