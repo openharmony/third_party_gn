@@ -82,6 +82,7 @@ class NinjaBuildWriter {
   void WriteAllPools();
   bool WriteSubninjas(Err* err);
   bool WritePhonyAndAllRules(Err* err);
+  void WritePreciseTarget();
 
   void WritePhonyRule(const Target* target, std::string_view phony_name);
 

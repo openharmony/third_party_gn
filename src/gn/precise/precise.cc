@@ -5,13 +5,11 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
-#include <regex>
+#include <map>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/json/json_reader.h"
 #include "base/strings/string_util.h"
-#include "base/values.h"
 #include "gn/build_settings.h"
 #include "gn/config.h"
 #include "gn/filesystem_utils.h"
@@ -19,232 +17,45 @@
 #include "gn/label_ptr.h"
 #include "gn/parse_tree.h"
 #include "gn/precise/precise.h"
+#include "gn/precise/precise_log.h"
+#include "gn/precise/precise_config.h"
+#include "gn/precise/precise_util.h"
 #include "gn/settings.h"
 #include "gn/substitution_writer.h"
 #include "gn/target.h"
 #include "gn/value.h"
+#include "gn/output_file.h"
 
 PreciseManager* PreciseManager::instance_ = nullptr;
-static int hFileDepth_ = INT_MAX;
-static int cFileDepth_ = INT_MAX;
-static int gnFileDepth_ = INT_MAX;
-static int gnModuleDepth_ = INT_MAX;
-static bool testOnly_ = false;
-static std::string outDir_;
-static std::string preciseConfig_;
-static std::string modifyFilesPath_;
-static std::string preciseResultPath_;
-static std::string preciseLogPath_;
-static std::vector<std::string> targetTypeList_;
-static std::vector<std::string> modifyHFileList_;
-static std::vector<std::string> modifyCFileList_;
-static std::vector<std::string> modifyGnFileList_;
-static std::vector<std::string> modifyGnModuleList_;
-static std::vector<std::string> ignoreList_;
-static std::vector<std::string> maxRangeList_;
-static std::unordered_set<std::string> includeParentTargets_;
-static std::unordered_set<std::string> excludeParentTargets_;
+static std::unique_ptr<precise::ConfigManager> configManager_;
+static std::unique_ptr<precise::HeaderChecker> headerChecker_;
 static std::unordered_map<std::string, bool> filter_cache;
 
-static bool ReadFile(base::FilePath path, std::string& content)
-{
-    if (!base::ReadFileToString(path, &content)) {
-        return false;
-    }
-    return true;
-}
 
-static void LoadHFileList(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        modifyHFileList_.push_back(value.GetString());
-    }
-}
-
-static void LoadCFileList(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        modifyCFileList_.push_back(value.GetString());
-    }
-}
-
-static void LoadGnFileList(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        modifyGnFileList_.push_back(value.GetString());
-    }
-}
-
-static void LoadGnModuleList(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        modifyGnModuleList_.push_back(value.GetString());
-    }
-}
-
-static void LoadHFileDepth(const base::Value& depth)
-{
-    hFileDepth_ = depth.GetInt();
-}
-
-static void LoadCFileDepth(const base::Value& depth)
-{
-    cFileDepth_ = depth.GetInt();
-}
-
-static void LoadGnFileDepth(const base::Value& depth)
-{
-    gnFileDepth_ = depth.GetInt();
-}
-
-static void LoadGnModuleDepth(const base::Value& depth)
-{
-    gnModuleDepth_ = depth.GetInt();
-}
-
-static void LoadIgnoreList(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        ignoreList_.push_back(value.GetString());
-    }
-}
-
-static void LoadMaxRangeList(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        maxRangeList_.push_back(value.GetString());
-    }
-}
-
-static void LoadModifyFilesPath(const base::Value& value)
-{
-    modifyFilesPath_ = value.GetString();
-    std::cout << "Precise config modify files path : " << modifyFilesPath_ << std::endl;
-}
-
-static void LoadPreciseResultPath(const base::Value& value)
-{
-    preciseResultPath_ = value.GetString();
-    std::cout << "Precise config result path : " << preciseResultPath_ << std::endl;
-}
-
-static void LoadPreciseLogPath(const base::Value& value)
-{
-    preciseLogPath_ = value.GetString();
-    std::cout << "Precise config log path : " << preciseLogPath_ << std::endl;
-}
-
-static void LoadTestOnly(const base::Value& value)
-{
-    testOnly_ = value.GetBool();
-    std::cout << "Precise config testonly : " << testOnly_ << std::endl;
-}
-
-static void LoadTargetTypeList(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        targetTypeList_.push_back(value.GetString());
-    }
-}
-
-static void LoadIncludeParentTargets(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        includeParentTargets_.insert(value.GetString());
-    }
-}
-
-static void LoadExcludeParentTargets(const base::Value& list)
-{
-    for (const base::Value& value : list.GetList()) {
-        excludeParentTargets_.insert(value.GetString());
-    }
-}
-
-static std::map<std::string, std::function<void(const base::Value& value)>> modifyMap_ = {
-    { "h_file", LoadHFileList },
-    { "c_file", LoadCFileList },
-    { "gn_file", LoadGnFileList },
-    { "gn_module", LoadGnModuleList },
-};
-
-static std::map<std::string, std::function<void(const base::Value& value)>> configMap_ = {
-    { "h_file_depth", LoadHFileDepth },
-    { "c_file_depth", LoadCFileDepth },
-    { "gn_file_depth", LoadGnFileDepth },
-    { "gn_module_depth", LoadGnModuleDepth },
-    { "test_only", LoadTestOnly},
-    { "target_type_list", LoadTargetTypeList },
-    { "ignore_list", LoadIgnoreList },
-    { "max_range_list", LoadMaxRangeList },
-    { "modify_files_path", LoadModifyFilesPath },
-    { "precise_result_path", LoadPreciseResultPath },
-    { "precise_log_path", LoadPreciseLogPath },
-    { "include_parent_targets", LoadIncludeParentTargets },
-    { "exclude_parent_targets", LoadExcludeParentTargets }
-};
-
-static void LoadModifyList()
-{
-    std::string modifyListContent;
-    if (!ReadFile(base::FilePath(modifyFilesPath_), modifyListContent)) {
-        std::cout << "Load modify file list failed." << std::endl;
-        return;
-    }
-    const base::DictionaryValue* modifyListDict;
-    std::unique_ptr<base::Value> modifyList = base::JSONReader::ReadAndReturnError(modifyListContent,
-        base::JSONParserOptions::JSON_PARSE_RFC, nullptr, nullptr, nullptr, nullptr);
-    if (!modifyList) {
-        std::cout << "Read modify file json failed." << std::endl;
-        return;
-    }
-    if (!modifyList->GetAsDictionary(&modifyListDict)) {
-        std::cout << "Get modify file dictionary failed." << std::endl;
-        return;
-    }
-
-    for (const auto kv : modifyListDict->DictItems()) {
-        auto iter = modifyMap_.find(kv.first);
-        if (iter != modifyMap_.end()) {
-            iter->second(kv.second);
-        }
-    }
-}
-
-static void LoadPreciseConfig()
-{
-    std::string configContent;
-    if (!ReadFile(base::FilePath(preciseConfig_), configContent)) {
-        std::cout << "Load precise config failed." << std::endl;
-        return;
-    }
-    const base::DictionaryValue* configDict;
-    std::unique_ptr<base::Value> config = base::JSONReader::ReadAndReturnError(configContent,
-        base::JSONParserOptions::JSON_PARSE_RFC, nullptr, nullptr, nullptr, nullptr);
-    if (!config) {
-        std::cout << "Read precise config json failed." << std::endl;
-        return;
-    }
-    if (!config->GetAsDictionary(&configDict)) {
-        std::cout << "Get precise config dictionary failed." << std::endl;
-        return;
-    }
-
-    for (const auto kv : configDict->DictItems()) {
-        auto iter = configMap_.find(kv.first);
-        if (iter != configMap_.end()) {
-            iter->second(kv.second);
-        }
-    }
-}
-
-PreciseManager::PreciseManager(const std::string& outDir, const std::string& preciseConfig)
+PreciseManager::PreciseManager(const std::string& outDir, const std::string& rootDir, const std::string& preciseConfig)
 {
     std::cout << "Read precise config from " << preciseConfig << std::endl;
     outDir_ = outDir;
-    preciseConfig_ = preciseConfig;
-    LoadPreciseConfig();
-    LoadModifyList();
+    rootDir_ = rootDir;
+
+    // Initialize configuration manager
+    configManager_ = std::make_unique<precise::ConfigManager>();
+    if (!configManager_->LoadConfig(preciseConfig)) {
+        std::cout << "Failed to load precise config" << std::endl;
+        return;
+    }
+
+    // Store config pointer for efficient access
+    config_ = &configManager_->GetConfig();
+
+    // Load modified file list
+    gnFileDepth_ = config_->gnFileDepth;  // Initialize gnFileDepth
+    if (!config_->modifyFilesPath.empty()) {
+        configManager_->LoadModifyList(config_->modifyFilesPath);
+    }
+
+    // Initialize header checker
+    headerChecker_ = std::make_unique<precise::HeaderChecker>(*config_, rootDir_);
 }
 
 void PreciseManager::AddModule(std::string name, Node* node)
@@ -254,8 +65,8 @@ void PreciseManager::AddModule(std::string name, Node* node)
 
 bool PreciseManager::IsIgnore(const std::string& name)
 {
-    auto result = std::find(ignoreList_.begin(), ignoreList_.end(), name);
-    if (result != ignoreList_.end()) {
+    auto result = std::find(config_->ignoreList.begin(), config_->ignoreList.end(), name);
+    if (result != config_->ignoreList.end()) {
         return true;
     }
     return false;
@@ -263,100 +74,81 @@ bool PreciseManager::IsIgnore(const std::string& name)
 
 bool PreciseManager::IsInMaxRange(const std::string& name)
 {
-    if (maxRangeList_.empty()) {
+    if (config_->maxRangeList.empty()) {
         return true;
     }
-    auto result = std::find(maxRangeList_.begin(), maxRangeList_.end(), name);
-    if (result != maxRangeList_.end()) {
+    auto result = std::find(config_->maxRangeList.begin(), config_->maxRangeList.end(), name);
+    if (result != config_->maxRangeList.end()) {
         return true;
     }
     return false;
 }
 
-bool PreciseManager::IsDependent(const Node* node)
-{
-    int size = node->GetFromList().size();
-    if (size == 0) {
-        return false;
-    }
-    if (size == 1) {
-        const Item* item = ((Module* )(node->GetFromList()[0]))->GetItem();
-        if(!FilterType(item)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool PreciseManager::IsContainModifiedFiles(const std::string& file, bool isHFile)
 {
-    if (isHFile) {
-        for (const std::string& h : modifyHFileList_) {
-            if (base::starts_with(h, file)) {
-                return true;
+    if(isHFile){
+        // Check if the result for this include_dir has been calculated in the cache
+        std::unordered_map<std::string, std::unordered_set<std::string>>& hfileIncludeDirsCache
+        = headerChecker_->GetHfileIncludeDirsCache();
+        auto cacheIt = hfileIncludeDirsCache.find(file);
+        if (cacheIt != hfileIncludeDirsCache.end()) {
+            return !cacheIt->second.empty();
+        }
+        // Not in cache, calculate the result
+        std::unordered_set<std::string> matching_files;
+        for (const std::string& h : config_->modifyHFileList) {
+            if (IsFileInList(file, config_->modifyHFileList, true)) {
+                matching_files.insert(h);
             }
         }
-        return false;
-    } else {
-        for (const std::string& c : modifyCFileList_) {
-            if (c == file) {
-                return true;
-            }
-        }
-        return false;
+        // Store the result in the cache
+        hfileIncludeDirsCache[file] = matching_files;
+        return !matching_files.empty();
     }
+    return IsFileInList(file, config_->modifyCFileList, false);
+}
+
+// Check if file is in the given list (supports prefix matching)
+bool PreciseManager::IsFileInList(const std::string& file,
+                                  const std::vector<std::string>& fileList,
+                                  bool checkDirPrefix) {
+    for (const std::string& modifyFile : fileList) {
+        // Exact match
+        if (file == modifyFile) {
+            return true;
+        }
+        if (checkDirPrefix && base::starts_with(modifyFile, file)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PreciseManager::CheckGNFileModified(const Item* item)
+{
+    for (const std::string& gn : config_->modifyGnFileList) {
+        SourceFile gnFile(gn);
+        for (const auto& cur_file : item->build_dependency_files()) {
+            if (cur_file == gnFile){
+                const Target* target = item->AsTarget();
+                bool include_toolchain = (target && !target->settings()->is_default());
+                precise::LogMessage("INFO", "CheckGNFileModified: [" + gnFile.value() + "] -> [" + cur_file.value() + "]" +
+                    " in " + item->label().GetUserVisibleName(include_toolchain));
+                return true;
+            }
+        }
+    }
+    const Target* target = item->AsTarget();
+    bool include_toolchain = (target && !target->settings()->is_default());
+    precise::LogMessage("DEBUG", "CheckGNFileModified: Not found in [" + item->label().GetUserVisibleName(include_toolchain) + "]");
+    return false;
 }
 
 bool PreciseManager::CheckActuallyUsedHeaders(const Item* item)
 {
-    if (item == nullptr) {
-        return false;
+    if (headerChecker_) {
+        return headerChecker_->CheckActuallyUsedHeaders(item);
     }
-
-    const Target *target = item->AsTarget();
-    if (target == nullptr) {
-        return false;
-    }
-
-    const std::vector<SourceFile>& sources = target->sources();
-    const BuildSettings* build_settings = target->settings()->build_settings();
-
-    for (const SourceFile& sourceFile : sources) {
-        std::string filePath = sourceFile.value();
-
-        // 将 // 开头的相对路径转换为绝对路径
-        std::string absolutePath;
-        if (base::starts_with(filePath, "//")) {
-            // 去掉开头的 //，然后与构建目录的根路径拼接
-            std::string relativePath = filePath.substr(2);
-            absolutePath = build_settings->root_path().value() + "/" + relativePath;
-        } else {
-            absolutePath = filePath;
-        }
-
-        std::string content;
-        if (!ReadFile(base::FilePath(absolutePath), content)) {
-            continue;
-        }
-
-        // 检查源文件是否包含了modifyHFileList_中的任何头文件
-        for (const std::string& headerFile : modifyHFileList_) {
-            // 提取头文件名（去掉路径）
-            size_t lastSlash = headerFile.find_last_of("/");
-            std::string headerName = (lastSlash != std::string::npos) ?
-                                     headerFile.substr(lastSlash + 1) : headerFile;
-
-            // 检查是否包含该头文件（支持 #include "header.h" 和 #include <header.h>）
-            std::string includePattern1 = "#include \"" + headerName + "\"";
-            std::string includePattern2 = "#include <" + headerName + ">";
-
-            if (content.find(includePattern1) != std::string::npos ||
-                content.find(includePattern2) != std::string::npos) {
-                return true;
-            }
-        }
-    }
-
     return false;
 }
 
@@ -391,7 +183,6 @@ bool PreciseManager::CheckIncludeInTarget(const Item* item)
         return false;
     }
 
-    std::string name = item->label().GetUserVisibleName(false);
     for (const SourceDir& dir : dirs) {
         if (IsContainModifiedFiles(dir.value(), true)) {
             return true;
@@ -412,6 +203,143 @@ bool PreciseManager::CheckSourceInTarget(const Item* item)
             return true;
         }
     }
+    return false;
+}
+
+// Helper function: determine if a string is likely a file path
+static bool IsLikelyFilePath(const std::string& str) {
+    // Empty string is not a file path
+    if (str.empty()) {
+        return false;
+    }
+
+    // Check if it starts with '-' (usually command line options, not files)
+    if (str[0] == '-') {
+        return false;
+    }
+
+    // Check if it contains path separators or looks like a file path
+    if (str.find('/') != std::string::npos || str.find('\\') != std::string::npos) {
+        return true;
+    }
+
+    // Check if it has a file extension (contains a dot and doesn't start with a dot)
+    size_t dot_pos = str.find('.');
+    if (dot_pos != std::string::npos && dot_pos > 0) {
+        return true;
+    }
+
+    // Check for common GN build variable substitution patterns (these are not real file paths)
+    if (str.find("{{") != std::string::npos) {
+        return false;
+    }
+
+    return false;
+}
+
+// Check if SubstitutionPattern is in the given file list
+// First check the raw pattern string, then try to expand the substitution pattern with sources
+bool PreciseManager::CheckSubstitutionPatternInList(
+    const Target* target,
+    const SubstitutionPattern& pattern,
+    const std::vector<SourceFile>& sources,
+    const std::vector<std::string>& fileList) {
+
+    // First check the raw pattern string
+    std::string pattern_str = pattern.AsString();
+    if (IsLikelyFilePath(pattern_str)) {
+        if (IsFileInList(pattern_str, fileList, false)) {
+            return true;
+        }
+    }
+
+    // If it contains substitution patterns, try to expand with each source
+    if (!sources.empty() && target->settings()) {
+        for (const SourceFile& source : sources) {
+            std::string expanded =
+                SubstitutionWriter::ApplyPatternToSourceAsString(
+                    target, target->settings(), pattern, source);
+            if (IsLikelyFilePath(expanded)) {
+                if (IsFileInList(expanded, fileList, false)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+bool PreciseManager::CheckFilesInActionTarget(const Item* item)
+{
+    if (item == nullptr || item->GetItemTypeName() != "target") {
+        return false;
+    }
+
+    const Target* target = item->AsTarget();
+    bool include_toolchain = !target->settings()->is_default();
+    std::string label = item->label().GetUserVisibleName(include_toolchain);
+
+    precise::LogMessage("DEBUG", "CheckFilesInActionTarget: checking target " + label);
+
+    if(target->output_type() != Target::ACTION &&
+        target->output_type() != Target::ACTION_FOREACH &&
+        target->output_type() != Target::COPY_FILES) {
+        precise::LogMessage("DEBUG", "CheckFilesInActionTarget: target type mismatch for " + label);
+        return false;
+    }
+
+    // Check script
+    const SourceFile& script = target->action_values().script();
+    if (!script.is_null()) {
+        precise::LogMessage("DEBUG", "CheckFilesInActionTarget: checking script " + script.value() + " for " + label);
+        if (IsFileInList(script.value(), config_->modifyOtherFileList, false)) {
+            precise::LogMessage("INFO", "CheckFilesInActionTarget: FOUND in script - " + script.value() + " for " + label);
+            return true;
+        }
+    }
+
+    // Check inputs
+    const std::vector<SourceFile>& inputs = target->config_values().inputs();
+    precise::LogMessage("DEBUG", "CheckFilesInActionTarget: checking " + std::to_string(inputs.size()) + " inputs for " + label);
+    for (const SourceFile& input : inputs) {
+        if (IsFileInList(input.value(), config_->modifyOtherFileList, false)) {
+            precise::LogMessage("INFO", "CheckFilesInActionTarget: FOUND in inputs - " + input.value() + " for " + label);
+            return true;
+        }
+    }
+
+    // Check sources
+    const std::vector<SourceFile>& sources = target->sources();
+    precise::LogMessage("DEBUG", "CheckFilesInActionTarget: checking " + std::to_string(sources.size()) + " sources for " + label);
+    for (const SourceFile& source : sources) {
+        if (IsFileInList(source.value(), config_->modifyOtherFileList, false)) {
+            precise::LogMessage("INFO", "CheckFilesInActionTarget: FOUND in sources - " + source.value() + " for " + label);
+            return true;
+        }
+    }
+
+    // Check file paths in args
+    const SubstitutionList& args = target->action_values().args();
+    precise::LogMessage("DEBUG", "CheckFilesInActionTarget: checking " + std::to_string(args.list().size()) + " args for " + label);
+    for (const SubstitutionPattern& arg : args.list()) {
+        if (CheckSubstitutionPatternInList(target, arg, sources, config_->modifyOtherFileList)) {
+            precise::LogMessage("INFO", "CheckFilesInActionTarget: FOUND in args for " + label);
+            return true;
+        }
+    }
+
+    // Check depfile
+    if (target->action_values().has_depfile()) {
+        precise::LogMessage("DEBUG", "CheckFilesInActionTarget: checking depfile for " + label);
+        const SubstitutionPattern& depfile = target->action_values().depfile();
+        if (CheckSubstitutionPatternInList(target, depfile, sources, config_->modifyOtherFileList)) {
+            precise::LogMessage("INFO", "CheckFilesInActionTarget: FOUND in depfile for " + label);
+            return true;
+        }
+    }
+
+    precise::LogMessage("DEBUG", "CheckFilesInActionTarget: NO MATCH found for " + label);
     return false;
 }
 
@@ -487,15 +415,34 @@ void PreciseManager::WriteFile(const std::string& path, const std::string& info)
     fileFd.close();
 }
 
-bool PreciseManager::FilterType(const Item* item)
+bool PreciseManager::FilterType(const Item* item, const bool inRecursive)
 {
     if (item == nullptr || item->GetItemTypeName() != "target") {
         return false;
     }
 
-    Target::OutputType type = item->AsTarget()->output_type();
-    if (type != Target::SHARED_LIBRARY && type != Target::STATIC_LIBRARY && type != Target::RUST_LIBRARY &&
-        type != Target::EXECUTABLE && type != Target::SOURCE_SET && type != Target::RUST_PROC_MACRO) {
+    const Target* target = item->AsTarget();
+    Target::OutputType type = target->output_type();
+
+    // Use a list to define allowed target types
+    static std::set<Target::OutputType> allowed_types = {
+        Target::SHARED_LIBRARY,
+        Target::STATIC_LIBRARY,
+        Target::RUST_LIBRARY,
+        Target::SOURCE_SET,
+        Target::RUST_PROC_MACRO
+    };
+
+    if (!inRecursive) {
+      // In non-recursive mode, also include action targets
+      allowed_types.insert(Target::ACTION);
+      allowed_types.insert(Target::ACTION_FOREACH);
+      allowed_types.insert(Target::GROUP);
+      allowed_types.insert(Target::COPY_FILES);
+      allowed_types.insert(Target::EXECUTABLE);
+    }
+
+    if (allowed_types.find(type) == allowed_types.end()) {
         return false;
     }
 
@@ -504,7 +451,11 @@ bool PreciseManager::FilterType(const Item* item)
         || base::ends_with(name, "__collect")
         || base::ends_with(name, "__notice")
         || base::ends_with(name, "_info_install_info")
-        || base::ends_with(name, "_resource_copy")) {
+        || base::ends_with(name, "__compile_resources")
+        || base::ends_with(name, "__metadata")
+        || base::ends_with(name, "__js_assets")
+        || base::ends_with(name, "_info")
+        ) {
         return false;
     }
 
@@ -525,7 +476,7 @@ bool PreciseManager::IsTargetTypeMatch(const Item* item)
         type += item->GetItemTypeName();
     }
 
-    if (std::find(targetTypeList_.begin(), targetTypeList_.end(), type) != targetTypeList_.end()) {
+    if (std::find(config_->targetTypeList.begin(), config_->targetTypeList.end(), type) != config_->targetTypeList.end()) {
         return true;
     }
 
@@ -534,7 +485,7 @@ bool PreciseManager::IsTargetTypeMatch(const Item* item)
 
 bool PreciseManager::IsTestOnlyMatch(const Item* item)
 {
-    if (item == nullptr || (testOnly_ && !item->testonly())) {
+    if (item == nullptr || (config_->testOnly && !item->testonly())) {
         return false;
     }
 
@@ -549,33 +500,34 @@ bool PreciseManager::IsFirstRecord(const std::vector<std::string>& result, const
     return false;
 }
 
-void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& result, 
-    std::vector<Module*>& module_list, std::vector<std::string>& log, 
-    bool forGn, int depth, int maxDepth, bool isHeader)
+void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& result,
+    std::vector<Module*>& module_list, bool forGn, int depth, int maxDepth, bool isHeader)
 {
     Module* module = (Module* )node;
     const Item* item = module->GetItem();
-    std::string name = item->label().GetUserVisibleName(false);
-    log.push_back("Check:" + name);
+    const Target* target = item->AsTarget();
+    bool include_toolchain = (target && !target->settings()->is_default());
+    std::string name = item->label().GetUserVisibleName(include_toolchain);
+    precise::LogMessage("INFO", "Check:" + name);
 
     if (depth >= maxDepth) {
-        log.push_back("Over Depth:" + name);
+        precise::LogMessage("WARN", "Over Depth:" + name);
         return;
     }
 
-    if (!FilterType(item)) {
-        log.push_back("FilterType false:" + name);
+    if (!FilterType(item, depth != 0)) {
+        precise::LogMessage("DEBUG", "FilterType false:" + name);
         return;
     }
 
     if (isHeader && depth == 0 && !CheckActuallyUsedHeaders(item) ) {
-        log.push_back("SourcesIncludeModifiedHeaders false:" + name);
+        precise::LogMessage("DEBUG", "SourcesIncludeModifiedHeaders false:" + name);
         return;
     }
 
     if (IsTargetTypeMatch(item) && IsTestOnlyMatch(item) && IsFirstRecord(result, name)
         && !IsIgnore(name) && IsInMaxRange(name)) {
-        log.push_back("OK:" + name);
+        precise::LogMessage("INFO", "OK:" + name);
         result.push_back(name);
         module_list.push_back(module);
         return;
@@ -584,36 +536,18 @@ void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& r
     for (Node* parent : node->GetFromList()) {
         Module* moduleParent = (Module* )parent;
         const Item* itemParent = moduleParent->GetItem();
-        std::string nameParent = itemParent->label().GetUserVisibleName(false);
-        log.push_back("Check Parent:" + nameParent + "->" + name);
-        PreciseSearch(parent, result, module_list, log, forGn, depth + 1, maxDepth, isHeader);
+        const Target* targetParent = itemParent->AsTarget();
+        bool include_toolchain_parent = (targetParent && !targetParent->settings()->is_default());
+        std::string nameParent = itemParent->label().GetUserVisibleName(include_toolchain_parent);
+        precise::LogMessage("INFO", "Check Parent:" + nameParent + "->" + name);
+        PreciseSearch(parent, result, module_list, forGn, depth + 1, maxDepth, isHeader);
     }
 }
 
-bool PreciseManager::CheckModuleInGn(const std::string& label)
-{
-    for (const std::string& gn : modifyGnFileList_) {
-        size_t pos = label.find(":");
-        if (pos == std::string::npos) {
-            return false;
-        }
-        std::string labelPrefix = label.substr(0, pos);
-
-        size_t posGn = gn.find("BUILD.gn");
-        if (posGn == std::string::npos) {
-            return false;
-        }
-        std::string filePrefix = gn.substr(0, posGn - 1);
-        if (labelPrefix == filePrefix) {
-            return true;
-        }
-    }
-    return false;
-}
 
 bool PreciseManager::CheckModuleMatch(const std::string& label)
 {
-    for (const std::string& modify : modifyGnModuleList_) {
+    for (const std::string& modify : config_->modifyGnModuleList) {
         if (label == modify) {
             return true;
         }
@@ -621,23 +555,85 @@ bool PreciseManager::CheckModuleMatch(const std::string& label)
     return false;
 }
 
-void PreciseManager::WritePreciseTargets(const std::vector<std::string>& result, const std::vector<std::string>& log)
+void PreciseManager::WritePreciseTargets(const std::vector<std::string>& result)
 {
-    std::string logInfo = "";
-    for(size_t i = 0; i < log.size(); ++i) {
-        logInfo += log[i];
-        logInfo += " ";
-        logInfo += "\n";
-    }
-    WriteFile(preciseLogPath_, logInfo);
-
     std::string resultInfo = "";
     for(size_t i = 0; i < result.size(); ++i) {
         resultInfo += result[i];
         resultInfo += " ";
         resultInfo += "\n";
     }
-    WriteFile(preciseResultPath_, resultInfo);
+    WriteFile(config_->preciseResultPath, resultInfo);
+}
+
+void PreciseManager::WritePreciseNinjaFile(const std::vector<Module*>& module_list)
+{
+    std::cout << "Writing precise targets file..." << std::endl;
+
+    // Collect all targets and their output files
+    std::vector<std::string> target_outputs;
+    std::vector<std::string> target_names;
+
+    if (module_list.empty()) {
+        std::cout << "No targets to add to precise build." << std::endl;
+        std::cout << "Writing empty precise target to prevent ninja build failure." << std::endl;
+    } else {
+        for (const Module* module : module_list) {
+            if (module == nullptr) {
+                continue;
+            }
+
+            const Item* item = module->GetItem();
+            if (item == nullptr || item->GetItemTypeName() != "target") {
+                continue;
+            }
+
+            const Target* target = item->AsTarget();
+            if (target == nullptr) {
+                continue;
+            }
+
+            // Get the target's output file
+            OutputFile output = target->dependency_output_file();
+            target_outputs.push_back(output.value());
+
+            // Get label with toolchain info for non-default toolchains
+            bool include_toolchain = !target->settings()->is_default();
+            std::string label = item->label().GetUserVisibleName(include_toolchain);
+            target_names.push_back(label);
+            precise::LogMessage("INFO", "Adding target to precise build: " + label + " -> " + output.value());
+        }
+    }
+
+    if (target_outputs.empty()) {
+        std::cout << "No valid targets found for precise build." << std::endl;
+        std::cout << "Creating phony precise target with no dependencies." << std::endl;
+    }
+
+    // Write to precise_targets.txt file
+    // This file will be read by NinjaBuildWriter to generate the precise phony target
+    std::string precise_file_content = "# Auto-generated precise build targets\n";
+    precise_file_content += "# This file contains the list of targets for precise compilation\n";
+    precise_file_content += "# Each line is an output file path relative to build directory\n\n";
+
+    if (target_outputs.empty()) {
+        // Write a phony target marker to prevent ninja build failure
+        precise_file_content += "# No targets identified for precise build\n";
+        precise_file_content += "# This is a placeholder to allow 'ninja precise' to succeed\n";
+    } else {
+        for (const std::string& output : target_outputs) {
+            precise_file_content += output + "\n";
+        }
+    }
+
+    std::string precise_targets_path = "precise_targets.txt";
+    WriteFile(precise_targets_path, precise_file_content);
+
+    std::cout << "Precise targets file written to: " << outDir_ + "/" + precise_targets_path << std::endl;
+    std::cout << "Total targets: " << target_names.size() << std::endl;
+    std::cout << "The 'precise' target will be automatically added to build.ninja" << std::endl;
+
+    precise::LogMessage("INFO", "Precise targets file written with " + std::to_string(target_names.size()) + " targets");
 }
 
 ModuleCheckResult PreciseManager::CheckModulePath(Module* module, const std::vector<std::string>& cache_list = {})
@@ -657,12 +653,12 @@ ModuleCheckResult PreciseManager::CheckModulePath(Module* module, const std::vec
         return result;
     }
 
-    if (excludeParentTargets_.find(label) != excludeParentTargets_.end()) {
+    if (config_->excludeParentTargets.find(label) != config_->excludeParentTargets.end()) {
         result.is_excluded = true;
         return result;
     }
 
-    if (includeParentTargets_.find(label) != includeParentTargets_.end() || filter_cache[label]) {
+    if (config_->includeParentTargets.find(label) != config_->includeParentTargets.end() || filter_cache[label]) {
         result.is_included = true;
         filter_cache[label] = true;
         if (!result.cache_list.empty()) {
@@ -705,20 +701,25 @@ void PreciseManager::ApplyTargetFilters(std::vector<std::string>& result, std::v
     for (int i = result.size() - 1; i >= 0; --i)
     {
         Module* module = module_list[i];
-        std::string label = module->GetItem()->label().GetUserVisibleName(false);
+        const Item* item = module->GetItem();
+        const Target* target = item->AsTarget();
+        bool include_toolchain = (target && !target->settings()->is_default());
+
+        std::string label = item->label().GetUserVisibleName(false);
+        std::string label_with_toolchain = item->label().GetUserVisibleName(include_toolchain);
 
         ModuleCheckResult checkResult = CheckModulePath(module, {});
         bool should_keep = true;
 
         if (checkResult.is_excluded) {
             should_keep = false;
-            std::cout << 
-            "Delete target in exclude parent targets:" << result[i] << "(index:" << i << ")" << std::endl;
+            std::cout <<
+            "Delete target in exclude parent targets:" << label_with_toolchain << "(index:" << i << ")" << std::endl;
         }
-        else if (!includeParentTargets_.empty() && !checkResult.is_included) {
+        else if (!config_->includeParentTargets.empty() && !checkResult.is_included) {
             should_keep = false;
-            std::cout << 
-            "Delete target not from include parent targets:" << result[i] << "(index:" << i << ")" << std::endl;
+            std::cout <<
+            "Delete target not from include parent targets:" << label_with_toolchain << "(index:" << i << ")" << std::endl;
         }
 
         if (!should_keep) {
@@ -733,31 +734,49 @@ void PreciseManager::GeneratPreciseTargets()
     std::cout << "GeneratPreciseTargets Begin." << std::endl;
     std::vector<std::string> result;
     std::vector<Module*> module_list;
-    std::vector<std::string> log;
-    log.push_back("Init Precise depth:" + std::to_string(hFileDepth_) + " " + std::to_string(cFileDepth_)
-        + " " + std::to_string(gnFileDepth_) + " " + std::to_string(gnModuleDepth_));
+
+    // Initialize real-time log system
+    precise::InitializeRealTimeLog(outDir_ + "/" + config_->preciseLogPath, config_->preciseLogLevel);
+    precise::LogMessage("INFO", "Init Precise depth:" + std::to_string(config_->hFileDepth) + " " + std::to_string(config_->cFileDepth)
+        + " " + std::to_string(config_->gnFileDepth) + " " + std::to_string(config_->gnModuleDepth) + " " + std::to_string(config_->otherFileDepth));
 
     for (const auto& pair : moduleList_) {
         Module* module = (Module* )pair.second;
         const Item* item = module->GetItem();
+        const Target* target = item->AsTarget();
+        bool include_toolchain = (target && !target->settings()->is_default());
         std::string label = item->label().GetUserVisibleName(false);
-        if (!FilterType(item)) {
+        std::string label_with_toolchain = item->label().GetUserVisibleName(include_toolchain);
+
+        if (!FilterType(item, false)) {
             continue;
         }
 
-        if (CheckSourceInTarget(item)) {
-            log.push_back("Hit C:");
-            PreciseSearch(pair.second, result, module_list, log, false, 0, cFileDepth_, false);
-        } else if (CheckIncludeInTarget(item) || CheckPrivateConfigs(item)
-            || CheckPublicConfigs(item) || CheckAllDepConfigs(item)) {
-            log.push_back("Hit H:");
-            PreciseSearch(pair.second, result, module_list, log, false, 0, hFileDepth_, true);
-        } else if (CheckModuleInGn(label)) {
-            log.push_back("Hit GN:");
-            PreciseSearch(pair.second, result, module_list, log, true, 0, gnFileDepth_, false);
-        } else if (CheckModuleMatch(label)) {
-            log.push_back("Hit Module:");
-            PreciseSearch(pair.second, result, module_list, log, true, 0, gnModuleDepth_, false);
+        // Check C/C++ source files (only if modifyCFileList is not empty)
+        if (!config_->modifyCFileList.empty() && CheckSourceInTarget(item)) {
+            precise::LogMessage("INFO", "Hit C:" + label_with_toolchain);
+            PreciseSearch(pair.second, result, module_list, false, 0, config_->cFileDepth, false);
+        }
+        // Check action target files (only if modifyOtherFileList is not empty)
+        else if (!config_->modifyOtherFileList.empty() && CheckFilesInActionTarget(item)) {
+            precise::LogMessage("INFO", "Hit Action:" + label_with_toolchain);
+            PreciseSearch(pair.second, result, module_list, false, 0, config_->otherFileDepth, false);
+        }
+        // Check header files (only if modifyHFileList is not empty)
+        else if (!config_->modifyHFileList.empty() && (CheckIncludeInTarget(item) || CheckPrivateConfigs(item)
+            || CheckPublicConfigs(item) || CheckAllDepConfigs(item))) {
+            precise::LogMessage("INFO", "Hit H:" + label_with_toolchain);
+            PreciseSearch(pair.second, result, module_list, false, 0, config_->hFileDepth, true);
+        }
+        // Check GN files (only if modifyGnFileList is not empty)
+        else if (!config_->modifyGnFileList.empty() && CheckGNFileModified(item)) {
+            precise::LogMessage("INFO", "Hit GN File:" + label_with_toolchain);
+            PreciseSearch(pair.second, result, module_list, true, 0, gnFileDepth_, false);
+        }
+        // Check GN modules (only if modifyGnModuleList is not empty)
+        else if (!config_->modifyGnModuleList.empty() && CheckModuleMatch(label)) {
+            precise::LogMessage("INFO", "Hit Module:" + label_with_toolchain);
+            PreciseSearch(pair.second, result, module_list, true, 0, config_->gnModuleDepth, false);
         }
     }
 
@@ -765,5 +784,12 @@ void PreciseManager::GeneratPreciseTargets()
     ApplyTargetFilters(result, module_list);
     std::cout << "Module target count after filtering:" << result.size() << std::endl;
 
-    WritePreciseTargets(result, log);
+    WritePreciseTargets(result);
+    WritePreciseNinjaFile(module_list);
+
+    // Clean up log system
+    if (precise::gLogManager) {
+        precise::gLogManager->Close();
+        precise::gLogManager.reset();
+    }
 }
