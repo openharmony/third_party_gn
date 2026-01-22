@@ -682,6 +682,9 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
     out_ << "\ndefault all" << std::endl;
   }
 
+  // Add precise build target if precise_targets.txt exists
+  WritePreciseTarget();
+
   return true;
 }
 
@@ -697,3 +700,51 @@ void NinjaBuildWriter::WritePhonyRule(const Target* target,
   path_output_.WriteFile(out_, target->dependency_output_file());
   out_ << std::endl;
 }
+
+void NinjaBuildWriter::WritePreciseTarget() {
+  // Try to open precise_targets.txt file
+  base::FilePath precise_targets_file = build_settings_->GetFullPath(
+      SourceFile(build_settings_->build_dir().value() + "precise_targets.txt"));
+
+  std::ifstream file(precise_targets_file.value());
+  if (!file.is_open()) {
+    // File doesn't exist, skip precise target generation
+    return;
+  }
+
+  // Read target outputs from file
+  std::vector<std::string> target_outputs;
+  std::string line;
+  while (std::getline(file, line)) {
+    // Skip empty lines and comments
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+    // Trim whitespace
+    line.erase(0, line.find_first_not_of(" \t\r\n"));
+    line.erase(line.find_last_not_of(" \t\r\n") + 1);
+    if (!line.empty()) {
+      target_outputs.push_back(line);
+    }
+  }
+  file.close();
+
+  // Generate precise phony target
+  // Always write this target, even if empty, to prevent ninja build failure
+  out_ << "\n# Auto-generated precise build target\n";
+  out_ << "# This target includes all filtered targets for precise compilation\n";
+  if (target_outputs.empty()) {
+    out_ << "# No targets identified, creating empty phony target\n";
+    out_ << "build precise: phony\n";
+  } else {
+    out_ << "build precise: phony";
+    for (size_t i = 0; i < target_outputs.size(); ++i) {
+      if (i > 0) {
+        out_ << " $\n    ";
+      }
+      out_ << " " << target_outputs[i];
+    }
+    out_ << std::endl;
+  }
+}
+
