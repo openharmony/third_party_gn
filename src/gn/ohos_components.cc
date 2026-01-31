@@ -528,7 +528,7 @@ bool OhosComponentsImpl::GetPrivateDepsLabel(const Value &dep, std::string &labe
 }
 
 bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::string &label,
-    const Label& current_toolchain, int &whole_status, Err *err) const
+    const Label& current_toolchain, int &whole_status, Err *err, bool strip_toolchain) const
 {
     std::string str_val = external_dep.string_value();
     size_t sep = str_val.find(":");
@@ -583,6 +583,15 @@ bool OhosComponentsImpl::GetExternalDepsLabel(const Value &external_dep, std::st
             "OHOS innerapi: (" + innerapi_name + ") not found for component (" + component_name + ").");
         return false;
     }
+
+    // 如果需要去除 toolchain 信息
+    if (strip_toolchain) {
+        size_t toolchain_pos = label.find("(");
+        if (toolchain_pos != std::string::npos) {
+            label = label.substr(0, toolchain_pos);
+        }
+    }
+
     return true;
 }
 
@@ -666,7 +675,7 @@ bool OhosComponents::isOhosComponentsLoaded() const
 }
 
 bool OhosComponents::GetExternalDepsLabel(const Value &external_dep, std::string &label,
-    const Label& current_toolchain, int &whole_status, Err *err) const
+    const Label& current_toolchain, int &whole_status, Err *err, bool strip_toolchain) const
 {
     if (!mgr) {
         if (err) {
@@ -675,7 +684,7 @@ bool OhosComponents::GetExternalDepsLabel(const Value &external_dep, std::string
         }
         return false;
     }
-    return mgr->GetExternalDepsLabel(external_dep, label, current_toolchain, whole_status, err);
+    return mgr->GetExternalDepsLabel(external_dep, label, current_toolchain, whole_status, err, strip_toolchain);
 }
 
 bool OhosComponents::GetPrivateDepsLabel(const Value &dep, std::string &label,
@@ -712,7 +721,7 @@ const OhosComponent *OhosComponents::GetComponentByLabel(const std::string &labe
 }
 
 void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, const Value *support, int checkType,
-    unsigned int ruleSwitch)
+    unsigned int ruleSwitch, bool whitelistDebug)
 {
     if (!support) {
         return;
@@ -725,7 +734,7 @@ void OhosComponents::LoadOhosComponentsChecker(const std::string &build_dir, con
         InnerApiPublicInfoGenerator::Init(build_dir, 0);
         return;
     }
-    OhosComponentChecker::Init(build_dir, checkType, ruleSwitch);
+    OhosComponentChecker::Init(build_dir, checkType, ruleSwitch, whitelistDebug);
     InnerApiPublicInfoGenerator::Init(build_dir, checkType);
     return;
 }
