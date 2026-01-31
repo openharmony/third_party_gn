@@ -95,7 +95,7 @@ public:
 
     bool isOhosIndepCompilerEnable();
     bool GetExternalDepsLabel(const Value &external_dep, std::string &label,
-        const Label& current_toolchain, int &whole_status, Err *err) const;
+        const Label& current_toolchain, int &whole_status, Err *err, bool strip_toolchain = false) const;
     bool GetPrivateDepsLabel(const Value &dep, std::string &label,
         const Label& current_toolchain, int &whole_status, Err *err) const;
     bool GetSubsystemName(const Value &part_name, std::string &label, Err *err) const;
@@ -103,7 +103,7 @@ public:
     const OhosComponent *GetComponentByLabel(const std::string &label) const;
 
     void LoadOhosComponentsChecker(const std::string &build_dir, const Value *support, int checkType,
-        unsigned int ruleSwitch);
+        unsigned int ruleSwitch, bool whitelistDebug = false);
 
     void LoadOhosComponentsMapping(const std::string& build_dir, const Value *support, const Value *independent);
 
