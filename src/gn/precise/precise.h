@@ -96,7 +96,7 @@ private:
     void WritePreciseTargets(const std::vector<std::string>& result);
     void WritePreciseNinjaFile(const std::vector<Module*>& module_list);
     ModuleCheckResult CheckModulePath(Module* module, const std::vector<std::string>& cache_list);
-    void ApplyTargetFilters(std::vector<std::string>& result, std::vector<Module*>& module_list);
+    void ApplyTargetFilters(std::vector<std::pair<Module*, int>>& modules_with_type);  // 过滤带类型标记的模块列表
     PreciseManager() {}
     PreciseManager(const std::string& outDir, const std::string& rootDir, const std::string& preciseConfig);
     PreciseManager &operator = (const PreciseManager &) = delete;

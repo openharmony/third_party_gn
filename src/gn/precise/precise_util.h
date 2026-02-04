@@ -38,12 +38,17 @@ public:
 
 private:
     std::string rootDir_;
-    std::vector<std::string> modify_h_files_;
     std::string log_level_;
+    const PreciseConfig& config_;  // Reference to configuration
 
     // Cache related
     std::unordered_map<std::string, std::unordered_set<std::string>> hfileIncludeDirsCache_;
     std::unordered_map<std::string, std::vector<std::string>> fileIncludesCache_;
+
+    // Header dependency cache: key = absolute file path, value = check result
+    // All cache keys use absolute paths for consistency
+    // true: confirmed dependency
+    // false: no confirmed dependency (may include depth limit cases)
     std::unordered_map<std::string, bool> headerDependencyCache_;
 
     // Extract include patterns from content
@@ -66,7 +71,8 @@ private:
                                         const std::string& cachedIncludeDir,
                                         const std::string& modifiedHeader,
                                         std::unordered_set<std::string>& visited,
-                                        const std::string& rootPath);
+                                        const std::string& rootPath,
+                                        int currentDepth);
 
     // Get all include directories for the target
     std::vector<std::string> GetAllIncludeDirs(const Item* item);
@@ -87,7 +93,8 @@ private:
     bool CheckRecursiveDependency(const std::vector<std::string>& includes,
                                   const std::vector<std::string>& include_dirs,
                                   const std::string& cached_include_dir,
-                                  const std::string& modified_header);
+                                  const std::string& modified_header,
+                                  int currentDepth);
 
     // Check if a single source file uses the modified header files
     bool CheckSingleSourceFile(const std::string& source_path,

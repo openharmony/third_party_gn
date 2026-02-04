@@ -23,7 +23,7 @@
 namespace precise {
 
 HeaderChecker::HeaderChecker(const PreciseConfig& config, const std::string& rootDir)
-    : rootDir_(rootDir), modify_h_files_(config.modifyHFileList), log_level_(config.preciseLogLevel) {
+    : rootDir_(rootDir), log_level_(config.preciseLogLevel), config_(config) {
 }
 
 HeaderChecker::~HeaderChecker() {
@@ -154,32 +154,55 @@ bool HeaderChecker::CheckHeaderDependencyRecursive(const std::string& header_pat
                                                     const std::string& cachedIncludeDir,
                                                     const std::string& modifiedHeader,
                                                     std::unordered_set<std::string>& visited,
-                                                    const std::string& rootPath) {
+                                                    const std::string& rootPath,
+                                                    int currentDepth) {
     if (header_path.empty()) {
         LogMessage("WARN", "CheckHeaderDependencyRecursive: empty header_path");
         return false;
     }
 
-    if (visited.find(header_path) != visited.end()) {
-        LogMessage("DEBUG", "CheckHeaderDependencyRecursive: already visited: " + header_path);
+    // 统一使用绝对路径作为缓存键和visited检查
+    std::string absolutePath = ConvertToAbsolutePath(header_path);
+
+    if (visited.find(absolutePath) != visited.end()) {
+        LogMessage("DEBUG", "CheckHeaderDependencyRecursive: already visited: " + absolutePath);
         return false;
     }
 
-    // Check cache: whether this header file has been checked for dependency on modified header files
-    std::string cacheKey = header_path + "|MODIFIED_HEADER";
-    auto depCacheIt = headerDependencyCache_.find(cacheKey);
+    // Check cache: use simple file path as key
+    auto depCacheIt = headerDependencyCache_.find(header_path);
     if (depCacheIt != headerDependencyCache_.end()) {
         LogMessage("DEBUG", "CheckHeaderDependencyRecursive: using cached result for " +
                    header_path + ": " + (depCacheIt->second ? "HAS_DEPENDENCY" : "NO_DEPENDENCY"));
         return depCacheIt->second;
     }
 
-    LogMessage("DEBUG", "CheckHeaderDependencyRecursive: analyzing header: " + header_path);
+    // 检查递归深度限制（在检查完缓存和visited之后）
+    // currentDepth 从 0 开始，所以当 currentDepth >= headerCheckerMaxDepth 时停止
+    if (config_.headerCheckerMaxDepth > 0 && currentDepth >= config_.headerCheckerMaxDepth) {
+        LogMessage("WARN", "CheckHeaderDependencyRecursive: reached max recursion depth " +
+                   std::to_string(config_.headerCheckerMaxDepth) + " (current: " +
+                   std::to_string(currentDepth) + ") at " + header_path);
+
+        // 缓存达到深度限制的结果，将当前链路上的所有头文件都标记为未确认依赖
+        for (const std::string& visited_file : visited) {
+            headerDependencyCache_[visited_file] = false;
+            LogMessage("DEBUG", "CheckHeaderDependencyRecursive: marking visited file as no confirmed dependency: " +
+                       visited_file);
+        }
+        // 也标记当前文件
+        headerDependencyCache_[header_path] = false;
+
+        return false;
+    }
+
+    LogMessage("DEBUG", "CheckHeaderDependencyRecursive: analyzing header: " + header_path +
+               " (depth: " + std::to_string(currentDepth) + ")");
     visited.insert(header_path);
 
     if (header_path == modifiedHeader.substr(2)) {
         LogMessage("INFO", "CheckHeaderDependencyRecursive: FOUND MATCH - header is modified: " + header_path);
-        headerDependencyCache_[cacheKey] = true;
+        headerDependencyCache_[header_path] = true;
         return true;
     }
 
@@ -196,23 +219,23 @@ bool HeaderChecker::CheckHeaderDependencyRecursive(const std::string& header_pat
         std::string candidatePath = cachedIncludeDir + includeName;
         if (candidatePath == modifiedHeader) {
             LogMessage("INFO", "CheckHeaderDependencyRecursive: FOUND MATCH - include is modified: " + candidatePath);
-            headerDependencyCache_[cacheKey] = true;
+            headerDependencyCache_[header_path] = true;
             return true;
         }
         std::string includedPath = ResolveIncludePath(includeName, include_dirs, rootPath);
         LogMessage("DEBUG", "CheckHeaderDependencyRecursive: checking recursive include '" +
                    includeName + "' -> '" + includedPath + "'");
 
-        if (CheckHeaderDependencyRecursive(includedPath, include_dirs, cachedIncludeDir, modifiedHeader, visited, rootPath)) {
+        if (CheckHeaderDependencyRecursive(includedPath, include_dirs, cachedIncludeDir, modifiedHeader, visited, rootPath, currentDepth + 1)) {
             LogMessage("INFO", "CheckHeaderDependencyRecursive: FOUND DEPENDENCY - " +
                        header_path + " -> " + includedPath + " -> modified header");
-            headerDependencyCache_[cacheKey] = true;
+            headerDependencyCache_[header_path] = true;
             return true;
         }
     }
 
     LogMessage("DEBUG", "CheckHeaderDependencyRecursive: NO DEPENDENCY found for " + header_path);
-    headerDependencyCache_[cacheKey] = false;
+    headerDependencyCache_[header_path] = false;
     return false;
 }
 
@@ -240,6 +263,23 @@ bool HeaderChecker::IsIncludeDirInTarget(const std::string& include_dir,
 bool HeaderChecker::CheckDirectInclude(const std::string& source_path,
                                        const std::string& include_dir,
                                        const std::string& modified_header) {
+    // 检查缓存：使用 source_path + modified_header 作为键
+    // 注意：不同 include_dir 可能会导致不同结果，但为了简化缓存，这里忽略 include_dir
+    // 实际使用中，同一源文件对同一修改头文件的直接包含关系通常是确定的
+    std::string cacheKey = source_path + "|" + modified_header;
+    auto cacheIt = headerDependencyCache_.find(cacheKey);
+    if (cacheIt != headerDependencyCache_.end()) {
+        if (cacheIt->second) {
+            LogMessage("DEBUG", "CheckDirectInclude: CACHED - " + source_path +
+                       " directly includes " + modified_header);
+            return true;
+        } else {
+            LogMessage("DEBUG", "CheckDirectInclude: CACHED - " + source_path +
+                       " does not directly include " + modified_header);
+            return false;
+        }
+    }
+
     std::vector<std::string> includes = GetFileIncludes(source_path);
 
     if (includes.empty()) {
@@ -251,6 +291,7 @@ bool HeaderChecker::CheckDirectInclude(const std::string& source_path,
         } else {
             // File read failed
             LogMessage("ERROR", "CheckDirectInclude: failed to read file: " + source_path);
+            headerDependencyCache_[cacheKey] = false;
             return false;
         }
     }
@@ -263,40 +304,46 @@ bool HeaderChecker::CheckDirectInclude(const std::string& source_path,
 
         if (candidatePath == modified_header) {
             LogMessage("INFO", "CheckDirectInclude: DIRECT MATCH - found modified header: " + modified_header);
+            headerDependencyCache_[cacheKey] = true;
             return true;
         }
     }
 
+    headerDependencyCache_[cacheKey] = false;
     return false;
 }
 
 bool HeaderChecker::CheckRecursiveDependency(const std::vector<std::string>& includes,
                                              const std::vector<std::string>& include_dirs,
                                              const std::string& cached_include_dir,
-                                             const std::string& modified_header) {
+                                             const std::string& modified_header,
+                                             int currentDepth) {
     for (const std::string& includeName : includes) {
         std::string includedPath = ResolveIncludePath(includeName, include_dirs, rootDir_);
 
-        // Check cache
-        std::string cacheKey = includedPath + "|MODIFIED_HEADER";
-        auto depCacheIt = headerDependencyCache_.find(cacheKey);
+        // Check cache using simple file path as key
+        auto depCacheIt = headerDependencyCache_.find(includedPath);
         if (depCacheIt != headerDependencyCache_.end()) {
             if (depCacheIt->second) {
                 LogMessage("INFO", "CheckRecursiveDependency: CACHED DEPENDENCY - " +
                            includedPath + " depends on modified header");
                 return true;
+            } else {
+                LogMessage("DEBUG", "CheckRecursiveDependency: cached no dependency for " +
+                           includedPath + ", skipping");
+                continue;
             }
-            continue;
         }
 
         LogMessage("DEBUG", "CheckRecursiveDependency: checking recursive dependency for: " +
-                   includedPath);
+                   includedPath + " (depth: " + std::to_string(currentDepth) + ")");
 
         std::unordered_set<std::string> visited;
         bool hasDependency = CheckHeaderDependencyRecursive(
-            includedPath, include_dirs, cached_include_dir, modified_header, visited, rootDir_);
+            includedPath, include_dirs, cached_include_dir, modified_header, visited, rootDir_, currentDepth + 1);
 
-        headerDependencyCache_[cacheKey] = hasDependency;
+        // Cache the result using simple file path as key
+        headerDependencyCache_[includedPath] = hasDependency;
 
         if (hasDependency) {
             LogMessage("INFO", "CheckRecursiveDependency: RECURSIVE DEPENDENCY - " +
@@ -346,7 +393,7 @@ bool HeaderChecker::CheckSingleSourceFile(const std::string& source_path,
             }
 
             // Check indirect include
-            if (CheckRecursiveDependency(includes, include_dirs, cachedIncludeDir, modifiedHeader)) {
+            if (CheckRecursiveDependency(includes, include_dirs, cachedIncludeDir, modifiedHeader, -1)) {
                 return true;
             }
         }
@@ -361,6 +408,12 @@ bool HeaderChecker::CheckSingleSourceFile(const std::string& source_path,
 bool HeaderChecker::CheckActuallyUsedHeaders(const Item* item) {
     if (item == nullptr) {
         return false;
+    }
+
+    // 检查是否启用了 HeaderChecker
+    if (!config_.enableHeaderChecker) {
+        LogMessage("INFO", "CheckActuallyUsedHeaders: HeaderChecker is disabled, returning true");
+        return true;  // 如果禁用，假定所有 target 都需要编译
     }
 
     const Target* target = item->AsTarget();
