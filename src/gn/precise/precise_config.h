@@ -38,6 +38,17 @@ struct PreciseConfig {
     std::vector<std::string> maxRangeList;
     std::unordered_set<std::string> includeParentTargets;
     std::unordered_set<std::string> excludeParentTargets;
+
+    // HeaderChecker 性能限制配置
+    // HeaderChecker 最大递归深度 (默认: 3, 0 表示无限制)
+    int headerCheckerMaxDepth = 3;
+
+    // 是否启用 HeaderChecker (默认: true)
+    bool enableHeaderChecker = true;
+
+    // HeaderChecker 支持的最大头文件数量 (默认: 5, 0 表示不限制)
+    // 当修改的头文件数量超过此值时，跳过 HeaderChecker 检查
+    int headerCheckerMaxFileCount = 5;
 };
 
 // Configuration manager class
@@ -54,6 +65,9 @@ public:
 
     // Get configuration
     const PreciseConfig& GetConfig() const { return config_; }
+
+    // Print configuration information
+    void PrintConfigInfo() const;
 
 private:
     PreciseConfig config_;
@@ -83,6 +97,11 @@ private:
 
     // Helper function to read file content
     bool ReadFile(const std::string& path, std::string& content);
+
+    // Load HeaderChecker performance limit configurations
+    void LoadHeaderCheckerMaxDepth(const base::Value& value);
+    void LoadEnableHeaderChecker(const base::Value& value);
+    void LoadHeaderCheckerMaxFileCount(const base::Value& value);
 };
 
 }  // namespace precise
