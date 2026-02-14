@@ -94,6 +94,7 @@ public:
     // 设置白名单调试模式
     void SetWhitelistDebug(bool enable) { whitelistDebug_ = enable; }
     bool IsWhitelistDebug() const { return whitelistDebug_; }
+    int GetCheckType() const { return checkType_; }
 
     // 添加拦截项到列表中（用于白名单调试模式）
     void AddToInterceptedList(const std::string &category, const std::string &label, const std::string &value = "") const;
