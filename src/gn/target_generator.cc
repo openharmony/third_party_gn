@@ -318,7 +318,7 @@ bool TargetGenerator::FillDependencies() {
     // 检查 public_external_deps
     OhosComponentChecker* checker = OhosComponentChecker::getInstance();
     const Value* public_external_deps_value = scope_->GetValue(variables::kPublicExternalDeps, true);
-    if ((!checker || checker->GetCheckType() != 4) && (public_external_deps_value && !public_external_deps_value->list_value().empty())) {
+    if ((checker && checker->GetCheckType() == 4) && (public_external_deps_value && !public_external_deps_value->list_value().empty())) {
       // 检查是否在 public_deps 白名单中
       std::string label = target_->label().GetUserVisibleName(false);
 
