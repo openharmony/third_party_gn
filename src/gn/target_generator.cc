@@ -398,7 +398,12 @@ bool TargetGenerator::FillDependencies() {
         return false;
       }
       // 调试模式下不在白名单中: 只打印(已在上面打印),不中断流程
-    }
+    } else {
+        // 在白名单中，保持原来的逻辑：执行 public_external_deps
+        if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps(),
+            &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
+          return false;
+    } 
   }
   if (!FillGenericDeps(variables::kDataDeps, &target_->data_deps()))
     return false;
