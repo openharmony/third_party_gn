@@ -122,6 +122,27 @@ Precise 使用 JSON 格式的配置文件，包含以下主要配置项：
 }
 ```
 
+#### HeaderChecker 性能限制配置
+
+```json
+{
+  // 是否启用 HeaderChecker (默认: true)
+  // 禁用后，所有 target 都会被假定需要编译
+  "enable_header_checker": true,
+
+  // HeaderChecker 最大递归深度 (默认: 10, 0 表示无限制)
+  // 控制检查头文件依赖关系的最大递归层数
+  // 从 0 开始计数，设置 5 表示检查 5 层（深度 0-4）
+  "header_checker_max_depth": 10,
+
+  // HeaderChecker 最大文件数量限制 (默认: 0, 表示不限制)
+  // 当修改的头文件数量超过此值时，跳过 HeaderChecker 检查
+  // 这是一个逃生机制，避免在大量头文件修改时性能下降
+  // 建议值：小型项目 100-200，中型项目 200-500，大型项目 500-1000
+  "header_checker_max_file_count": 200
+}
+```
+
 ### 修改文件列表
 
 修改文件列表是一个 JSON 文件，记录了所有修改过的文件：
@@ -167,61 +188,107 @@ if (preciseEnable && preciseEnable->boolean_value()) {
 }
 ```
 
-### 2. 分析阶段
+### 2. 三阶段分析流程
 
-Precise 按以下顺序检查每个 target：
+Precise 采用三阶段处理流程来优化性能和准确性：
+
+#### Phase 1: 收集候选模块
+
+遍历所有 target，根据文件变更类型初步匹配：
 
 ```
 对于每个 target:
-  ├─ 检查是否包含修改的 C/C++ 源文件
-  │   └─ 如果包含，进行深度为 c_file_depth 的依赖分析
-  │
-  ├─ 检查是否使用修改的头文件
-  │   ├─ 检查 include_dirs
-  │   ├─ 检查 public_configs
-  │   ├─ 检查 configs
-  │   └─ 检查 all_dependent_configs
-  │   └─ 如果使用，进行深度为 h_file_depth 的依赖分析
-  │
-  ├─ 检查是否引用修改的 GN 构建文件
-  │   └─ 如果引用，进行深度为 gn_file_depth 的依赖分析
-  │
-  ├─ 检查是否是修改的 GN 模块
-  │   └─ 如果是，进行深度为 gn_module_depth 的依赖分析
-  │
-  └─ 检查 action target 中的其他文件
-      ├─ 检查 script
-      ├─ 检查 inputs
-      ├─ 检查 sources
-      ├─ 检查 args 中的文件路径
-      └─ 检查 depfile
-      └─ 如果包含，进行深度为 other_file_depth 的依赖分析
+  ├─ 检查是否包含修改的 C/C++ 源文件 → 标记为类型 0
+  ├─ 检查 action target 中的其他文件 → 标记为类型 1
+  ├─ 检查是否使用修改的头文件目录 → 标记为类型 2
+  ├─ 检查是否引用修改的 GN 构建文件 → 标记为类型 3
+  └─ 检查是否是修改的 GN 模块 → 标记为类型 4
 ```
 
-### 3. 过滤阶段
+此阶段**不进行深度搜索**，仅收集初步匹配的模块并标记类型。
 
-对分析出的 target 进行过滤：
+#### Phase 2: 应用过滤器并生成缓存
+
+对候选模块应用父目标过滤规则：
 
 ```cpp
-// 应用父目标过滤
-void ApplyTargetFilters(std::vector<std::string>& result,
-                        std::vector<Module*>& module_list) {
-    for (int i = result.size() - 1; i >= 0; --i) {
+void ApplyTargetFilters(modules_with_type) {
+    for (module : modules_with_type) {
         ModuleCheckResult checkResult = CheckModulePath(module, {});
 
         // 排除在 exclude_parent_targets 中的目标
         if (checkResult.is_excluded) {
-            删除该目标;
+            移除该模块;
         }
 
         // 如果配置了 include_parent_targets，
-        // 仅保留依赖链经过这些目标的项目
+        // 仅保留依赖链经过这些目标的模块
         if (!includeParentTargets.empty() && !checkResult.is_included) {
-            删除该目标;
+            移除该模块;
         }
     }
 }
 ```
+
+此阶段：
+- **提前淘汰**不合格的模块
+- **生成 filter_cache** 供后续使用
+- **减少** Phase 3 需要处理的模块数量
+
+#### Phase 3: 深度搜索（全链路过滤）
+
+对通过 Phase 2 的模块进行递归依赖搜索：
+
+```
+对于每个过滤后的模块:
+  └─ 根据类型进行深度搜索
+      ├─ 类型 0 (C/C++): 深度 c_file_depth
+      ├─ 类型 1 (Action): 深度 other_file_depth
+      ├─ 类型 2 (Header): 深度 h_file_depth
+      ├─ 类型 3 (GN File): 深度 gn_file_depth
+      └─ 类型 4 (GN Module): 深度 gn_module_depth
+```
+
+**关键特性：全链路父目标过滤**
+
+在深度搜索的**每个递归层级**都进行 `CheckModulePath` 检查：
+
+```cpp
+void PreciseSearch(module, depth) {
+    // 在每个层级都检查父目标过滤
+    ModuleCheckResult checkResult = CheckModulePath(module, {});
+    if (checkResult.is_excluded || !checkResult.is_included) {
+        return;  // 停止继续递归
+    }
+
+    // 继续检查父依赖
+    for (parent : module.parents) {
+        PreciseSearch(parent, depth + 1);
+    }
+}
+```
+
+这确保了：
+- **入口模块**符合过滤规则（Phase 2 已检查）
+- **整个依赖链**上的每个模块都符合规则（Phase 3 再次检查）
+- **不会**因为某个父模块不符合规则而错误包含
+
+### 3. 过滤阶段说明
+
+#### 父目标过滤机制
+
+`CheckModulePath` 递归检查模块的完整父依赖链：
+
+```
+CheckModulePath(module):
+  ├─ 如果模块在 exclude_parent_targets 中 → is_excluded = true
+  ├─ 如果模块在 include_parent_targets 中 → is_included = true
+  ├─ 检查所有父模块
+  │   └─ 递归调用 CheckModulePath(parent)
+  └─ 返回检查结果
+```
+
+**缓存机制：** `filter_cache` 存储 `CheckModulePath` 的结果，避免重复计算。
 
 ### 4. 输出阶段
 
@@ -238,12 +305,20 @@ void ApplyTargetFilters(std::vector<std::string>& result,
 
 ### PreciseManager
 
-精确构建管理器，负责整体流程控制。
+精确构建管理器，负责整体流程控制和策略决策。
+
+**主要职责：**
+- 三阶段分析流程的协调
+- 父目标过滤的高层决策
+- 逃生机制的执行（如文件数量限制）
 
 **主要方法：**
 - `Init()`: 初始化管理器
-- `GeneratPreciseTargets()`: 生成精确构建目标列表
-- `PreciseSearch()`: 递归搜索依赖目标
+- `GeneratPreciseTargets()`: 生成精确构建目标列表（三阶段流程）
+- `PreciseSearch()`: 递归搜索依赖目标（带全链路过滤）
+- `CheckActuallyUsedHeaders()`: 检查 target 是否实际使用修改的头文件（含逃生机制）
+- `CheckModulePath()`: 检查模块的父依赖链是否符合过滤规则
+- `ApplyTargetFilters()`: 应用父目标过滤器并生成缓存
 - `CheckSourceInTarget()`: 检查 target 是否包含修改的源文件
 - `CheckIncludeInTarget()`: 检查 target 是否使用修改的头文件目录
 - `CheckGNFileModified()`: 检查 target 是否依赖修改的 GN 文件
@@ -257,18 +332,31 @@ void ApplyTargetFilters(std::vector<std::string>& result,
 - `LoadConfig()`: 加载主配置文件
 - `LoadModifyList()`: 加载修改文件列表
 - `GetConfig()`: 获取配置对象
+- `PrintConfigInfo()`: 打印配置信息（调试用）
 
 ### HeaderChecker
 
-头文件检查器，负责分析头文件依赖关系。
+头文件检查器，负责分析头文件依赖关系的具体实现。
+
+**设计原则：**
+- **专注执行检查逻辑**，不涉及高层策略决策
+- **轻量化设计**，移除了不必要的成员变量
+- **缓存优化**，使用多层缓存提升性能
 
 **主要方法：**
 - `CheckActuallyUsedHeaders()`: 检查 target 是否实际使用修改的头文件
-- `GetFileIncludes()`: 获取文件的 include 列表
+- `GetFileIncludes()`: 获取文件的 include 列表（带缓存）
 - `ResolveIncludePath()`: 解析 include 路径
-- `CheckHeaderDependencyRecursive()`: 递归检查头文件依赖
-- `AddCache()`: 添加缓存
+- `CheckHeaderDependencyRecursive()`: 递归检查头文件依赖（带深度限制）
+- `CheckDirectInclude()`: 检查直接包含关系（带缓存）
+- `CheckRecursiveDependency()`: 检查间接包含关系（带缓存）
+- `AddCache()`: 添加头文件目录缓存
 - `ClearCaches()`: 清理所有缓存
+
+**缓存机制：**
+- `hfileIncludeDirsCache_`: 头文件目录缓存
+- `fileIncludesCache_`: 文件 include 列表缓存
+- `headerDependencyCache_`: 头文件依赖关系缓存
 
 ### LogManager
 
@@ -325,6 +413,8 @@ ohos_precise_config = "//build/precise_config.json"
     "//utils/*",
     "//drivers/*"
   ],
+  "enable_header_checker": true,
+  "header_checker_max_depth": 10,
   "modify_files_path": "out/build_configs/modify_files.json",
   "gn_modifications_path": "out/build_configs/gn_modifications.json",
   "precise_result_path": "out/precise_targets.txt",
@@ -374,7 +464,59 @@ Precise 使用多层缓存来提高性能：
 - **文件 include 缓存**: 缓存已解析的文件的 include 列表
 - **依赖关系缓存**: 缓存头文件对修改头文件的依赖关系
 
-### 2. 建议配置
+### 2. HeaderChecker 性能限制
+
+对于包含大量依赖或源文件的部件，HeaderChecker 可能会运行较长时间。可以通过以下配置进行限制：
+
+#### 2.1 文件数量逃生机制
+
+当修改的头文件数量超过阈值时，自动跳过 HeaderChecker：
+
+```json
+{
+  "header_checker_max_file_count": 200
+}
+```
+
+**工作原理：**
+- 在 `PreciseManager::CheckActuallyUsedHeaders` 中检查
+- 如果 `modify_h_file_list.size() > header_checker_max_file_count`
+- 直接返回 `true`，假定所有 target 都需要编译
+
+**建议配置：**
+- **小型项目** (< 100 targets): `100-200` - 允许较详细检查
+- **中型项目** (100-500 targets): `200-500` - 平衡准确性和性能
+- **大型项目** (> 500 targets): `500-1000` - 优先保证性能
+- **设置为 0**: 不限制，始终进行检查
+
+#### 2.2 递归深度限制
+
+控制检查头文件依赖关系的最大递归层数：
+
+```json
+{
+  "header_checker_max_depth": 10
+}
+```
+
+**建议配置：**
+- **小型项目**: `10-15` - 允许较深的依赖链
+- **中型项目**: `5-10` - 平衡准确性和性能
+- **大型项目**: `3-5` - 优先保证性能
+
+#### 2.3 完全禁用 HeaderChecker
+
+如果某些场景下不需要精确的头文件检查，可以完全禁用：
+
+```json
+{
+  "enable_header_checker": false
+}
+```
+
+**注意**: 禁用 HeaderChecker 后，所有 target 都会被假定需要编译，可能导致不必要的重新编译。
+
+### 3. 建议配置
 
 根据项目规模调整深度配置：
 
@@ -384,18 +526,27 @@ Precise 使用多层缓存来提高性能：
   c_file_depth: 10
   gn_file_depth: 5
   gn_module_depth: 10
+  other_file_depth: 5
+  header_checker_max_depth: 10
+  header_checker_max_file_count: 200
 
 中型项目 (1000-5000 targets):
   h_file_depth: 5
   c_file_depth: 5
   gn_file_depth: 3
   gn_module_depth: 5
+  other_file_depth: 3
+  header_checker_max_depth: 5
+  header_checker_max_file_count: 500
 
 大型项目 (> 5000 targets):
   h_file_depth: 3
   c_file_depth: 3
   gn_file_depth: 2
   gn_module_depth: 3
+  other_file_depth: 2
+  header_checker_max_depth: 3
+  header_checker_max_file_count: 1000
 ```
 
 ## 典型使用场景
@@ -515,3 +666,9 @@ Precise 使用多层缓存来提高性能：
 - **v1.2** - 添加父目标过滤功能
 - **v1.3** - 添加实时日志系统
 - **v1.4** - 添加性能优化和缓存机制
+- **v1.5** - 架构优化和性能提升
+  - 重构为三阶段分析流程（收集候选 → 过滤缓存 → 深度搜索）
+  - 实现全链路父目标过滤（每个递归层级都进行检查）
+  - 优化架构职责分离（PreciseManager 负责策略，HeaderChecker 负责执行）
+  - 添加 HeaderChecker 文件数量逃生机制
+  - 改进缓存机制和递归深度限制
