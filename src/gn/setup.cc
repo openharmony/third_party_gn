@@ -463,20 +463,26 @@ bool Setup::FillOhosComponentsInfo(const std::string& build_dir, Err* err)
 
   const Value* checkType = build_settings_.build_args().GetArgOverride("ohos_components_checktype");
   const Value* ruleSwitch = build_settings_.build_args().GetArgOverride("ohos_interception_rule_switch");
+  const Value* whitelistDebug = build_settings_.build_args().GetArgOverride("ohos_interception_whitelist_debug");
+  bool whitelistDebugEnabled = false;
+  if (whitelistDebug && whitelistDebug->type() == Value::BOOLEAN) {
+    whitelistDebugEnabled = whitelistDebug->boolean_value();
+  }
+
   if (ruleSwitch && ruleSwitch->type() == Value::INTEGER) {
     if (checkType && checkType->type() == Value::INTEGER) {
-      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value(), ruleSwitch->int_value());
+      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value(), ruleSwitch->int_value(), whitelistDebugEnabled);
     } else {
       ohos_components_.LoadOhosComponentsChecker(build_dir, support,
-          OhosComponentChecker::CheckType::INTERCEPT_IGNORE_TEST, ruleSwitch->int_value());
+          OhosComponentChecker::CheckType::INTERCEPT_IGNORE_TEST, ruleSwitch->int_value(), whitelistDebugEnabled);
     }
   } else {
     if (checkType && checkType->type() == Value::INTEGER) {
       const unsigned int INTERCEPT_ALL_RULE = (1 << (OhosComponentChecker::BinaryLeftShift::ALL - 1)) - 1;
-      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value(), INTERCEPT_ALL_RULE);
+      ohos_components_.LoadOhosComponentsChecker(build_dir, support, checkType->int_value(), INTERCEPT_ALL_RULE, whitelistDebugEnabled);
     } else {
       ohos_components_.LoadOhosComponentsChecker(build_dir, support, OhosComponentChecker::CheckType::NONE,
-          OhosComponentChecker::BinaryLeftShift::UNKNOWN);
+          OhosComponentChecker::BinaryLeftShift::UNKNOWN, whitelistDebugEnabled);
     }
   }
   if (independent) {
@@ -631,6 +637,10 @@ bool Setup::RunPostMessageLoop(const base::CommandLine& cmdline) {
   if (graph != nullptr) {
     graph->GenGraph(builder_.GetAllResolvedItems());
   }
+
+  // 写入拦截的目标列表（如果启用了白名单调试模式）
+  OhosComponentChecker::WriteInterceptedListIfNeeded();
+
   return true;
 }
 

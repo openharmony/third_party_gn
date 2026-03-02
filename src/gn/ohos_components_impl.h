@@ -65,11 +65,11 @@ public:
     void LoadToolchain(const Value *product);
 
     bool LoadOhosComponents(const std::string &build_dir,
-                            const Value *enable, const Value *indep, const Value *product, 
+                            const Value *enable, const Value *indep, const Value *product,
                             bool special_parts_switch, Err *err);
 
     bool GetExternalDepsLabel(const Value &external_dep, std::string &label,
-        const Label& current_toolchain, int &whole_status, Err *err) const;
+        const Label& current_toolchain, int &whole_status, Err *err, bool strip_toolchain = false) const;
     bool GetPrivateDepsLabel(const Value &dep, std::string &label,
         const Label& current_toolchain, int &whole_status, Err *err) const;
     bool GetSubsystemName(const Value &component_name, std::string &subsystem_name, Err *err) const;

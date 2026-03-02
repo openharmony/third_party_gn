@@ -12,6 +12,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/values.h"
 #include "gn/build_settings.h"
 #include "gn/config.h"
@@ -267,6 +268,13 @@ bool OhosComponentChecker::InterceptAllDepsConfig(const Target *target, const st
         return true;
     }
 
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("all_dependent_configs", label);
+        std::cerr << "[WHITELIST DEBUG] all_dependent_configs blocked: " << label << std::endl;
+        return true;
+    }
+
     *err = Err(target->defined_from(), "all_dependent_configs not allowed.",
         "The item " + label + " does not allow all_dependent_configs.");
     return false;
@@ -283,6 +291,15 @@ bool OhosComponentChecker::InterceptIncludesOverRange(const Target *target, cons
     if (result != includes_over_range_.end()) {
         return true;
     }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("includes_over_range", label);
+        std::cerr << "[WHITELIST DEBUG] Header file range blocked: " << label
+                 << " includes " << dir << std::endl;
+        return true;
+    }
+
     *err = Err(target->defined_from(), "Header file range is too large.",
         "The item " + label + " header : " + dir + " range is too large.");
     return false;
@@ -302,18 +319,28 @@ bool OhosComponentChecker::InterceptInnerApiPublicDepsInner(const Target *target
             return true;
         }
     }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("innerapi_public_deps_inner", label, deps);
+        std::cerr << "[WHITELIST DEBUG] InnerApi public_deps to internal blocked: " << label
+                 << " -> " << deps << std::endl;
+        return true;
+    }
+
     *err = Err(target->defined_from(), "InnerApi not allow the use of public_deps dependent internal modules.",
         "The item " + label + " not allow the use of public_deps dependent internal module : " + deps);
     return false;
 }
 
 bool OhosComponentChecker::InterceptPublicDeps(const Target *target, const std::string &label,
-        const std::string &deps, Err *err) const
+        const std::string &deps, const OhosComponent *from_component, Err *err) const
     {
         if (!IsIntercept(ruleSwitch_, PUBLIC_DEPS_BINARY)) {
             return true;
         }
-    
+
+        // 检查白名单
         if (auto res = public_deps_.find(label); res != public_deps_.end()) {
             std::string deps_str(deps);
             auto res_second = std::find(res->second.begin(), res->second.end(), Trim(deps_str));
@@ -321,9 +348,53 @@ bool OhosComponentChecker::InterceptPublicDeps(const Target *target, const std::
                 return true;
             }
         }
-        *err = Err(target->defined_from(), "public_deps/public_external_deps not allowed.",
-            "The item " + label + " not allow the use of public_deps/public_external_deps dependent module : " + deps);
-         return false;
+
+        // 新规则：检查是否为同一组件内的依赖
+        if (from_component != nullptr) {
+            // 检查 deps 是否在当前组件的模块路径内
+            bool is_same_component = false;
+            for (const auto& path : from_component->modulePath()) {
+                if (StartWith(deps, path)) {
+                    is_same_component = true;
+                    break;
+                }
+            }
+
+            // 允许同一组件内使用 public_deps
+            if (is_same_component) {
+                return true;
+            }
+
+            // 跨组件使用 public_deps，报错
+            // 白名单调试模式: 打印但不中断，并收集拦截列表
+            if (whitelistDebug_) {
+                AddToInterceptedList("public_deps", label, deps);
+                std::cerr << "[WHITELIST DEBUG] Cross-component public_deps blocked: " << label
+                         << " -> " << deps << std::endl;
+                return true;
+            }
+
+            *err = Err(target->defined_from(),
+                "Cross-component public_deps is not allowed.",
+                "The item " + label + " cannot use public_deps to depend on " + deps +
+                "\n"
+                "public_deps is only allowed within the same component. " +
+                "For cross-component dependencies, please use deps or external_deps.");
+            return false;
+        }
+
+        // 如果没有组件信息，默认不允许
+        // 白名单调试模式: 打印但不中断，并收集拦截列表
+        if (whitelistDebug_) {
+            AddToInterceptedList("public_deps", label, deps);
+            std::cerr << "[WHITELIST DEBUG] public_deps blocked (no component info): " << label
+                     << " -> " << deps << std::endl;
+            return true;
+        }
+
+        *err = Err(target->defined_from(), "public_deps not allowed.",
+            "The item " + label + " not allow the use of public_deps dependent module : " + deps);
+        return false;
     }
 
 bool OhosComponentChecker::InterceptLibDir(const Target *target, const std::string &label,
@@ -350,6 +421,14 @@ bool OhosComponentChecker::InterceptLibDir(const Target *target, const std::stri
         }
     }
 
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("lib_dirs", label, dir);
+        std::cerr << "[WHITELIST DEBUG] lib_dirs blocked: " << label
+                 << " lib_dir: " << dir << std::endl;
+        return true;
+    }
+
     *err = Err(target->defined_from(), "lib_dirs not allowed.",
         "The item" + label + " do not use lib_dirs : " + dir);
     return false;
@@ -365,6 +444,14 @@ bool OhosComponentChecker::InterceptInnerApiNotLib(const Item *item, const std::
     if (result != innerapi_not_lib_.end()) {
         return true;
     }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("innerapi_not_lib", label);
+        std::cerr << "[WHITELIST DEBUG] InnerApi not lib blocked: " << label << std::endl;
+        return true;
+    }
+
     *err =
         Err(item->defined_from(), "InnerApi is not a library type.", "The item " + label + " is not a library type.");
     return false;
@@ -393,6 +480,15 @@ bool OhosComponentChecker::InterceptDepsNotLib(const Item *item, const std::stri
             return true;
         }
     }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("deps_not_lib", label, deps);
+        std::cerr << "[WHITELIST DEBUG] Deps not lib blocked: " << label
+                 << " -> " << deps << std::endl;
+        return true;
+    }
+
     *err = Err(item->defined_from(), "Depend a non-lib target.",
         "The item " + label + " cannot depend on a non-lib target " + deps);
     return false;
@@ -408,6 +504,14 @@ bool OhosComponentChecker::InterceptInnerApiNotDeclare(const Item *item, const s
     if (result != innerapi_not_declare_.end()) {
         return true;
     }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("innerapi_not_declare", label);
+        std::cerr << "[WHITELIST DEBUG] InnerApi not declared blocked: " << label << std::endl;
+        return true;
+    }
+
     *err = Err(item->defined_from(), "InnerApi is not defined in bundle.json.",
         "The item " + label + " is not defined in bundle.json.");
     return false;
@@ -436,6 +540,15 @@ bool OhosComponentChecker::InterceptIncludesAbsoluteDepsOther(const Target *targ
             return true;
         }
     }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("includes_absolute_deps_other", label, includes);
+        std::cerr << "[WHITELIST DEBUG] Directly use header files of other components blocked: " << label
+                 << " includes " << includes << std::endl;
+        return true;
+    }
+
     *err = Err(target->defined_from(), "Do not directly use header files of other components.",
         "The item " + label + " do not directly use header files : " + includes + " of other components." +
         "\n"
@@ -467,6 +580,15 @@ bool OhosComponentChecker::InterceptTargetAbsoluteDepsOther(const Item *item, co
             return true;
         }
     }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("target_absolute_deps_other", label, deps);
+        std::cerr << "[WHITELIST DEBUG] Absolute dependency on other component blocked: " << label
+                 << " -> " << deps << std::endl;
+        return true;
+    }
+
     *err = Err(item->defined_from(), "Not allow use absolute dependent other component.",
         "The item " + label + " not allow use absolute dependent other component : " + deps +
         "\n"
@@ -478,6 +600,14 @@ bool OhosComponentChecker::InterceptInnerApiVisibilityDenied(const Item *item, c
     const std::string &to_label, Err *err) const
 {
     if (!IsIntercept(ruleSwitch_, INNERAPI_VISIBILITY_DENIED)) {
+        return true;
+    }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("innerapi_visibility_denied", from_label, to_label);
+        std::cerr << "[WHITELIST DEBUG] InnerApi visibility denied: " << from_label
+                 << " -> " << to_label << std::endl;
         return true;
     }
 
@@ -512,6 +642,15 @@ bool OhosComponentChecker::InterceptImportOther(const FunctionCallNode *function
             return true;
         }
     }
+
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("import_other", label, deps);
+        std::cerr << "[WHITELIST DEBUG] Import other gni blocked: " << label
+                 << " imports " << deps << std::endl;
+        return true;
+    }
+
     *err = Err(function->function(), "Not allow import other gni.",
         label + " not allow import other gni : " + deps);
     return false;
@@ -538,6 +677,14 @@ bool OhosComponentChecker::InterceptDepsComponentNotDeclare(const Item *item, co
         }
     }
 
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("deps_component_not_declare", from_name, to_name);
+        std::cerr << "[WHITELIST DEBUG] Component not declared in bundle.json: " << from_name
+                 << " depends on " << to_name << std::endl;
+        return true;
+    }
+
     *err = Err(item->defined_from(), "The deps component is not declared in bundle.json.",
                "The item " + label + " depends on component '" + to_name + "'" +
                "\n"
@@ -560,6 +707,14 @@ bool OhosComponentChecker::InterceptExternalDepsInner(const Item *item, const st
         }
     }
 
+    // 白名单调试模式: 打印但不中断，并收集拦截列表
+    if (whitelistDebug_) {
+        AddToInterceptedList("external_deps_inner_target", from_label, to_label);
+        std::cerr << "[WHITELIST DEBUG] Cannot use external_deps for inner module: " << from_label
+                 << " -> " << to_label << std::endl;
+        return true;
+    }
+
     *err = Err(item->defined_from(), "Cannot use 'external_deps' dependency inner module.",
                "The item " + from_label + " cannot use 'external_deps' dependency inner module " + to_label +
                "\n"
@@ -568,11 +723,12 @@ bool OhosComponentChecker::InterceptExternalDepsInner(const Item *item, const st
     return false;
 }
 
-OhosComponentChecker::OhosComponentChecker(const std::string &build_dir, int checkType, unsigned int ruleSwitch)
+OhosComponentChecker::OhosComponentChecker(const std::string &build_dir, int checkType, unsigned int ruleSwitch, bool whitelistDebug)
 {
     checkType_ = checkType;
     build_dir_ = build_dir;
     ruleSwitch_ = ruleSwitch;
+    whitelistDebug_ = whitelistDebug;
     if (checkType_ == CheckType::INTERCEPT_IGNORE_TEST || checkType_ == CheckType::INTERCEPT_ALL) {
         LoadWhitelist(build_dir_);
     }
@@ -677,13 +833,16 @@ bool OhosComponentChecker::CheckPublicDeps(const Target *target, const std::stri
         if (checkType_ <= CheckType::NONE || target == nullptr || (ignoreTest_ && target->testonly())) {
             return true;
         }
-    
+
+        const OhosComponent *from_component = target->ohos_component();
+
         if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
-            return InterceptPublicDeps(target, label, deps, err);
+            return InterceptPublicDeps(target, label, deps, from_component, err);
         }
-        const OhosComponent *component = target->ohos_component();
-        GenerateScanList("public_deps.list", component == nullptr ? "" : component->subsystem(),
-            component == nullptr ? "" : component->name(), label, deps);
+
+        // 扫描模式：记录所有 public_deps 使用情况
+        GenerateScanList("public_deps.list", from_component == nullptr ? "" : from_component->subsystem(),
+            from_component == nullptr ? "" : from_component->name(), label, deps);
         return true;
     }
 
@@ -922,3 +1081,102 @@ bool OhosComponentChecker::CheckExternalDepsInner(const Item *item, const OhosCo
 
     return true;
 }
+
+bool OhosComponentChecker::IsPublicDepsWhitelisted(const std::string& label, const std::string& deps)
+{
+    // 检查指定的 label 和 deps 组合是否在 public_deps 白名单中
+    if (auto res = public_deps_.find(label); res != public_deps_.end()) {
+        std::string deps_str(deps);
+        auto res_second = std::find(res->second.begin(), res->second.end(), Trim(deps_str));
+        if (res_second != res->second.end()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void OhosComponentChecker::AddToInterceptedList(const std::string &category, const std::string &label, const std::string &value) const
+{
+    if (!whitelistDebug_) {
+        return;
+    }
+
+    // 判断是简单列表类型还是字典类型
+    // 简单列表类型: all_dependent_configs, includes_over_range, innerapi_not_lib, innerapi_not_declare
+    // 字典类型: innerapi_public_deps_inner, public_deps, lib_dirs, includes_absolute_deps_other, target_absolute_deps_other,
+    //           import_other, deps_not_lib, deps_component_not_declare, external_deps_inner_target, fuzzy_match
+
+    if (category == "all_dependent_configs" || category == "includes_over_range" ||
+        category == "innerapi_not_lib" || category == "innerapi_not_declare") {
+        // 简单列表类型（需要去重）
+        auto &list = interceptedList_[category];
+        if (std::find(list.begin(), list.end(), label) == list.end()) {
+            list.push_back(label);
+        }
+    } else {
+        // 字典类型（需要去重）
+        if (!value.empty()) {
+            auto &list = interceptedDict_[category][label];
+            if (std::find(list.begin(), list.end(), value) == list.end()) {
+                list.push_back(value);
+            }
+        }
+    }
+}
+
+void OhosComponentChecker::WriteInterceptedListToFile() const
+{
+    std::string outputPath = build_dir_ + "/intercepted_target_list.json";
+
+    // 构建 JSON 值
+    base::Value root_dict(base::Value::Type::DICTIONARY);
+
+    // 添加简单列表类型的拦截项
+    for (const auto &category : {"all_dependent_configs", "includes_over_range", "innerapi_not_lib", "innerapi_not_declare"}) {
+        auto it = interceptedList_.find(category);
+        if (it != interceptedList_.end() && !it->second.empty()) {
+            base::Value list(base::Value::Type::LIST);
+            for (const auto &item : it->second) {
+                list.GetList().push_back(base::Value(item));
+            }
+            root_dict.SetKey(category, std::move(list));
+        }
+    }
+
+    // 添加字典类型的拦截项
+    for (const auto &category : {"innerapi_public_deps_inner", "public_deps", "lib_dirs",
+                                  "includes_absolute_deps_other", "target_absolute_deps_other",
+                                  "import_other", "deps_not_lib",
+                                  "deps_component_not_declare", "external_deps_inner_target"}) {
+        auto it = interceptedDict_.find(category);
+        if (it != interceptedDict_.end() && !it->second.empty()) {
+            base::Value dict(base::Value::Type::DICTIONARY);
+            for (const auto &entry : it->second) {
+                base::Value list(base::Value::Type::LIST);
+                for (const auto &item : entry.second) {
+                    list.GetList().push_back(base::Value(item));
+                }
+                dict.SetKey(entry.first, std::move(list));
+            }
+            root_dict.SetKey(category, std::move(dict));
+        }
+    }
+
+    // 写入 JSON 文件
+    std::string json_string;
+    base::JSONWriter::WriteWithOptions(root_dict,
+                                        base::JSONWriter::OPTIONS_PRETTY_PRINT,
+                                        &json_string);
+
+    std::ofstream file(outputPath);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file for writing intercepted list: " << outputPath << std::endl;
+        return;
+    }
+
+    file << json_string;
+    file.close();
+
+    std::cout << "Intercepted target list written to: " << outputPath << std::endl;
+}
+

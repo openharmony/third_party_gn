@@ -146,6 +146,17 @@ bool PreciseManager::CheckGNFileModified(const Item* item)
 
 bool PreciseManager::CheckActuallyUsedHeaders(const Item* item)
 {
+    // 逃生机制：检查修改的头文件数量是否超过配置的最大值
+    if (config_->headerCheckerMaxFileCount > 0) {
+        size_t totalHeaderFiles = config_->modifyHFileList.size();
+        if (totalHeaderFiles > static_cast<size_t>(config_->headerCheckerMaxFileCount)) {
+            precise::LogMessage("WARN", "CheckActuallyUsedHeaders: Modified header files count (" +
+                std::to_string(totalHeaderFiles) + ") exceeds maximum (" +
+                std::to_string(config_->headerCheckerMaxFileCount) + "), skipping HeaderChecker");
+            return true;  // 超过限制，假定所有 target 都需要编译
+        }
+    }
+
     if (headerChecker_) {
         return headerChecker_->CheckActuallyUsedHeaders(item);
     }
@@ -515,6 +526,18 @@ void PreciseManager::PreciseSearch(const Node* node, std::vector<std::string>& r
         return;
     }
 
+    // 在深度搜索的每一层都进行父目标过滤检查
+    // 确保整个依赖链上的每个模块都符合过滤规则
+    ModuleCheckResult checkResult = CheckModulePath(module, {});
+    if (checkResult.is_excluded) {
+        precise::LogMessage("DEBUG", "Module excluded by parent filter:" + name + " (depth:" + std::to_string(depth) + ")");
+        return;
+    }
+    if (!config_->includeParentTargets.empty() && !checkResult.is_included) {
+        precise::LogMessage("DEBUG", "Module not in include parent list:" + name + " (depth:" + std::to_string(depth) + ")");
+        return;
+    }
+
     if (!FilterType(item, depth != 0)) {
         precise::LogMessage("DEBUG", "FilterType false:" + name);
         return;
@@ -696,11 +719,11 @@ ModuleCheckResult PreciseManager::CheckModulePath(Module* module, const std::vec
     return result;
 }
 
-void PreciseManager::ApplyTargetFilters(std::vector<std::string>& result, std::vector<Module*>& module_list)
+void PreciseManager::ApplyTargetFilters(std::vector<std::pair<Module*, int>>& modules_with_type)
 {
-    for (int i = result.size() - 1; i >= 0; --i)
+    for (int i = modules_with_type.size() - 1; i >= 0; --i)
     {
-        Module* module = module_list[i];
+        Module* module = modules_with_type[i].first;
         const Item* item = module->GetItem();
         const Target* target = item->AsTarget();
         bool include_toolchain = (target && !target->settings()->is_default());
@@ -723,8 +746,7 @@ void PreciseManager::ApplyTargetFilters(std::vector<std::string>& result, std::v
         }
 
         if (!should_keep) {
-            result.erase(result.begin() + i);
-            module_list.erase(module_list.begin() + i);
+            modules_with_type.erase(modules_with_type.begin() + i);
         }
     }
 }
@@ -737,8 +759,17 @@ void PreciseManager::GeneratPreciseTargets()
 
     // Initialize real-time log system
     precise::InitializeRealTimeLog(outDir_ + "/" + config_->preciseLogPath, config_->preciseLogLevel);
-    precise::LogMessage("INFO", "Init Precise depth:" + std::to_string(config_->hFileDepth) + " " + std::to_string(config_->cFileDepth)
-        + " " + std::to_string(config_->gnFileDepth) + " " + std::to_string(config_->gnModuleDepth) + " " + std::to_string(config_->otherFileDepth));
+
+    // 打印全部配置信息
+    configManager_->PrintConfigInfo();
+
+    // 阶段1: 收集所有初步匹配的模块（不进行深度搜索）
+    std::cout << "Phase 1: Collecting candidate modules..." << std::endl;
+    std::vector<Module*> candidate_modules;
+    std::vector<std::pair<Module*, int>> modules_with_type;  // Module + 类型标记
+
+    size_t total_modules = moduleList_.size();
+    size_t processed_modules = 0;
 
     for (const auto& pair : moduleList_) {
         Module* module = (Module* )pair.second;
@@ -749,40 +780,84 @@ void PreciseManager::GeneratPreciseTargets()
         std::string label_with_toolchain = item->label().GetUserVisibleName(include_toolchain);
 
         if (!FilterType(item, false)) {
+            processed_modules++;
             continue;
         }
 
-        // Check C/C++ source files (only if modifyCFileList is not empty)
+        // 收集匹配的模块（标记类型但不进行深度搜索）
+        // 0: C/C++, 1: Action, 2: Header, 3: GN File, 4: GN Module
         if (!config_->modifyCFileList.empty() && CheckSourceInTarget(item)) {
-            precise::LogMessage("INFO", "Hit C:" + label_with_toolchain);
-            PreciseSearch(pair.second, result, module_list, false, 0, config_->cFileDepth, false);
-        }
-        // Check action target files (only if modifyOtherFileList is not empty)
-        else if (!config_->modifyOtherFileList.empty() && CheckFilesInActionTarget(item)) {
-            precise::LogMessage("INFO", "Hit Action:" + label_with_toolchain);
-            PreciseSearch(pair.second, result, module_list, false, 0, config_->otherFileDepth, false);
-        }
-        // Check header files (only if modifyHFileList is not empty)
-        else if (!config_->modifyHFileList.empty() && (CheckIncludeInTarget(item) || CheckPrivateConfigs(item)
+            modules_with_type.push_back({module, 0});
+        } else if (!config_->modifyOtherFileList.empty() && CheckFilesInActionTarget(item)) {
+            modules_with_type.push_back({module, 1});
+        } else if (!config_->modifyHFileList.empty() && (CheckIncludeInTarget(item) || CheckPrivateConfigs(item)
             || CheckPublicConfigs(item) || CheckAllDepConfigs(item))) {
-            precise::LogMessage("INFO", "Hit H:" + label_with_toolchain);
-            PreciseSearch(pair.second, result, module_list, false, 0, config_->hFileDepth, true);
+            modules_with_type.push_back({module, 2});
+        } else if (!config_->modifyGnFileList.empty() && CheckGNFileModified(item)) {
+            modules_with_type.push_back({module, 3});
+        } else if (!config_->modifyGnModuleList.empty() && CheckModuleMatch(label)) {
+            modules_with_type.push_back({module, 4});
         }
-        // Check GN files (only if modifyGnFileList is not empty)
-        else if (!config_->modifyGnFileList.empty() && CheckGNFileModified(item)) {
-            precise::LogMessage("INFO", "Hit GN File:" + label_with_toolchain);
-            PreciseSearch(pair.second, result, module_list, true, 0, gnFileDepth_, false);
-        }
-        // Check GN modules (only if modifyGnModuleList is not empty)
-        else if (!config_->modifyGnModuleList.empty() && CheckModuleMatch(label)) {
-            precise::LogMessage("INFO", "Hit Module:" + label_with_toolchain);
-            PreciseSearch(pair.second, result, module_list, true, 0, config_->gnModuleDepth, false);
+
+        processed_modules++;
+        if (processed_modules % 100 == 0 || processed_modules == total_modules) {
+            std::cout << "[" << processed_modules << "/" << total_modules << "] ("
+                      << (processed_modules * 100 / total_modules) << "%)" << std::endl;
         }
     }
 
-    std::cout << "Module target count before filtering:" << result.size() << std::endl;
-    ApplyTargetFilters(result, module_list);
-    std::cout << "Module target count after filtering:" << result.size() << std::endl;
+    std::cout << "Found " << modules_with_type.size() << " candidate modules" << std::endl;
+
+    // 阶段2: 应用过滤器并生成缓存
+    std::cout << "Phase 2: Applying filters and building cache..." << std::endl;
+    ApplyTargetFilters(modules_with_type);
+    std::cout << "After filtering: " << modules_with_type.size() << " modules remain" << std::endl;
+
+    // 阶段3: 深度搜索（使用 Phase2 生成的缓存）
+    std::cout << "Phase 3: Performing deep search with cached filters..." << std::endl;
+    size_t filtered_count = modules_with_type.size();
+    size_t processed_count = 0;
+
+    for (const auto& pair : modules_with_type) {
+        Module* module = pair.first;
+        int type = pair.second;
+        const Item* item = module->GetItem();
+        const Target* target = item->AsTarget();
+        bool include_toolchain = (target && !target->settings()->is_default());
+        std::string label_with_toolchain = item->label().GetUserVisibleName(include_toolchain);
+
+        // 根据类型进行深度搜索
+        switch (type) {
+            case 0: // C/C++
+                precise::LogMessage("INFO", "Deep search C:" + label_with_toolchain);
+                PreciseSearch(module, result, module_list, false, 0, config_->cFileDepth, false);
+                break;
+            case 1: // Action
+                precise::LogMessage("INFO", "Deep search Action:" + label_with_toolchain);
+                PreciseSearch(module, result, module_list, false, 0, config_->otherFileDepth, false);
+                break;
+            case 2: // Header
+                precise::LogMessage("INFO", "Deep search H:" + label_with_toolchain);
+                PreciseSearch(module, result, module_list, false, 0, config_->hFileDepth, true);
+                break;
+            case 3: // GN File
+                precise::LogMessage("INFO", "Deep search GN File:" + label_with_toolchain);
+                PreciseSearch(module, result, module_list, true, 0, gnFileDepth_, false);
+                break;
+            case 4: // GN Module
+                precise::LogMessage("INFO", "Deep search Module:" + label_with_toolchain);
+                PreciseSearch(module, result, module_list, true, 0, config_->gnModuleDepth, false);
+                break;
+        }
+
+        // 更新进度
+        processed_count++;
+        if (processed_count % 10 == 0 || processed_count == filtered_count) {
+            std::cout << "[" << processed_count << "/" << filtered_count << "]" << std::endl;
+        }
+    }
+
+    std::cout << "Final module target count: " << result.size() << std::endl;
 
     WritePreciseTargets(result);
     WritePreciseNinjaFile(module_list);
