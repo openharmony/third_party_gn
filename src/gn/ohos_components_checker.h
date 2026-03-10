@@ -44,6 +44,7 @@ public:
 
     static void Init(const std::string &build_dir, int checkType, unsigned int ruleSwitch, bool whitelistDebug = false)
     {
+        std::lock_guard<std::mutex> lock(instanceMutex_);
         if (instance_ != nullptr) {
             return;
         }
@@ -106,10 +107,12 @@ private:
     unsigned int ruleSwitch_;
     std::string build_dir_;
     static OhosComponentChecker *instance_;
+    static std::mutex instanceMutex_;  // 保护单例初始化的互斥锁
 
     // 收集被拦截的目标（用于生成拦截清单）
     mutable std::map<std::string, std::vector<std::string>> interceptedList_;  // 简单列表类型的拦截项
     mutable std::map<std::string, std::map<std::string, std::vector<std::string>>> interceptedDict_;  // 字典类型的拦截项
+    mutable std::mutex interceptedListMutex_;  // 保护拦截列表的互斥锁
     bool InterceptAllDepsConfig(const Target *target, const std::string &label, Err *err) const;
     bool InterceptIncludesOverRange(const Target *target, const std::string &label, const std::string &dir,
         Err *err) const;

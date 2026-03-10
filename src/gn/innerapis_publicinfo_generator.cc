@@ -27,6 +27,7 @@
 #include "gn/metadata.h"
 
 InnerApiPublicInfoGenerator *InnerApiPublicInfoGenerator::instance_ = nullptr;
+std::mutex InnerApiPublicInfoGenerator::instanceMutex_;
 
 static bool StartWith(const std::string &str, const std::string &prefix)
 {

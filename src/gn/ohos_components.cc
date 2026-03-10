@@ -28,7 +28,7 @@
  * Each component has zero or more innerapis
  */
 
-static const std::string EMPTY_INNERAPI;
+static const std::string EMPTY_INNERAPI = "";
 
 static const int PATH_PREFIX_LEN = 2;
 
