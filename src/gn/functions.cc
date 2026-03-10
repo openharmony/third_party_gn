@@ -10,6 +10,8 @@
 #include <utility>
 
 #include "base/environment.h"
+#include "base/sha2.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "gn/build_settings.h"
 #include "gn/config.h"
@@ -371,7 +373,7 @@ Value RunConfig(const FunctionCallNode* function,
 
   // Create the new config.
   std::unique_ptr<Config> config = std::make_unique<Config>(
-      scope->settings(), label, scope->build_dependency_files());
+      scope->settings(), label, scope->CollectBuildDependencyFiles());
   config->set_defined_from(function);
   if (!Visibility::FillItemVisibility(config.get(), scope, err))
     return Value();
@@ -933,7 +935,7 @@ Value RunPool(const FunctionCallNode* function,
 
   // Create the new pool.
   std::unique_ptr<Pool> pool = std::make_unique<Pool>(
-      scope->settings(), label, scope->build_dependency_files());
+      scope->settings(), label, scope->CollectBuildDependencyFiles());
 
   if (label.name() == "console") {
     const Settings* settings = scope->settings();
@@ -1156,6 +1158,65 @@ Value RunSplitList(Scope* scope,
   }
 
   return result;
+}
+
+// string_hash -----------------------------------------------------------------
+
+const char kStringHash[] = "string_hash";
+const char kStringHash_HelpShort[] =
+    "string_hash: Calculates a stable hash of the given string.";
+const char kStringHash_Help[] =
+    R"(string_hash: Calculates a stable hash of the given string.
+
+  hash = string_hash(long_string)
+
+  `string_hash` returns a string that contains a hash of the argument.  The hash
+  is computed by first calculating the SHA256 hash of the argument, and then
+  returning the first 8 characters of the lowercase-ASCII, hexadecimal encoding
+  of the SHA256 hash.
+
+  `string_hash` is intended to be used when it is desirable to translate,
+  globally unique strings (such as GN labels) into short filenames that are
+  still globally unique.  This is useful when supporting filesystems and build
+  systems which impose limits on the length of the supported filenames and/or on
+  the total path length.
+
+  Warning: This hash should never be used for cryptographic purposes.
+  Unique inputs can be assumed to result in unique hashes if the inputs
+  are trustworthy, but malicious inputs may be able to trigger collisions.
+  Directories and names of GN labels are usually considered trustworthy.
+
+Examples:
+
+    string_hash("abc")  -->  "ba7816bf"
+)";
+
+Value RunStringHash(Scope* scope,
+                    const FunctionCallNode* function,
+                    const std::vector<Value>& args,
+                    Err* err) {
+  // Check usage: Number of arguments.
+  if (args.size() != 1) {
+    *err = Err(function, "Wrong number of arguments to string_hash().",
+               "Expecting exactly one. usage: string_hash(string)");
+    return Value();
+  }
+
+  // Check usage: argument is a string.
+  if (!args[0].VerifyTypeIs(Value::STRING, err)) {
+    *err = Err(function, "argument of string_hash is not a string",
+               "Expecting argument to be a string.");
+    return Value();
+  }
+  const std::string& arg = args[0].string_value();
+
+  // Arguments looks good; do the hash.
+  std::array<uint8_t, base::kSha256Length> hash = base::Sha256(arg);
+
+  // Trimming to 32 bits for improved ergonomics.  Probability of collisions
+  // should still be sufficiently low (see https://crbug.com/46330294 for more
+  // discussion).
+  return Value(function, base::ToLowerASCII(base::HexEncode(hash.data(), 4)));
 }
 
 // string_join -----------------------------------------------------------------
@@ -1499,6 +1560,7 @@ struct FunctionInfoInitializer {
     INSERT_FUNCTION(GetTargetOutputs, false)
     INSERT_FUNCTION(Import, false)
     INSERT_FUNCTION(LabelMatches, false)
+    INSERT_FUNCTION(Len, false)
     INSERT_FUNCTION(NotNeeded, false)
     INSERT_FUNCTION(PathExists, false)
     INSERT_FUNCTION(Pool, false)
@@ -1510,6 +1572,7 @@ struct FunctionInfoInitializer {
     INSERT_FUNCTION(SetDefaults, false)
     INSERT_FUNCTION(SetDefaultToolchain, false)
     INSERT_FUNCTION(SplitList, false)
+    INSERT_FUNCTION(StringHash, false)
     INSERT_FUNCTION(StringJoin, false)
     INSERT_FUNCTION(StringReplace, false)
     INSERT_FUNCTION(StringSplit, false)
@@ -1556,7 +1619,7 @@ Value RunFunction(Scope* scope,
   if (found_function->second.self_evaluating_args_runner) {
     // Self evaluating args functions are special weird built-ins like foreach.
     // Rather than force them all to check that they have a block or no block
-    // and risk bugs for new additions, check a whitelist here.
+    // and risk bugs for new additions, check an allowlist here.
     if (found_function->second.self_evaluating_args_runner != &RunForEach) {
       if (!VerifyNoBlockForFunctionCall(function, block, err))
         return Value();

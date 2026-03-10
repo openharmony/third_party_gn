@@ -16,7 +16,10 @@ const char kGnVersion_HelpShort[] = "gn_version: [number] The version of gn.";
 const char kGnVersion_Help[] =
     R"(gn_version: [number] The version of gn.
 
-  Corresponds to the number printed by `gn --version`.
+  Corresponds to the number printed by `gn --version`. This variable is
+  only variable available in the dotfile (all the rest are missing
+  because the dotfile has to be parsed before args.gn or anything else
+  is processed).
 
 Example
 
@@ -437,9 +440,21 @@ const char kAllDependentConfigs_Help[] =
   This addition happens in a second phase once a target and all of its
   dependencies have been resolved. Therefore, a target will not see these
   force-added configs in their "configs" variable while the script is running,
-  and they can not be removed. As a result, this capability should generally
-  only be used to add defines and include directories necessary to compile a
-  target's headers.
+  and they can not be removed.
+
+  Use of all_dependent_configs should be avoided when possible.
+
+  If your target has include_dirs and defines needed by targets that depend on
+  it, the correct solution is to add those settings to public_configs and those
+  targets choose whether to forward them up the dependency tree by whether they
+  depend on your target via public_deps or not.
+
+  There are two recommended uses of this feature:
+
+   1. Legacy cases that can't easily be updated to use the proper public deps
+      and configs.
+   2. Additional linker flag that need to be set on the final linked target
+      regardless of whether the dependency path is public or private.
 
   See also "public_configs".
 )" COMMON_ORDERING_HELP;
@@ -853,77 +868,6 @@ Example
     check_includes = false
     ...
   }
-)";
-
-const char kCodeSigningArgs[] = "code_signing_args";
-const char kCodeSigningArgs_HelpShort[] =
-    "code_signing_args: [string list] [deprecated] Args for the "
-    "post-processing script.";
-const char kCodeSigningArgs_Help[] =
-    R"(code_signing_args: [string list] [deprecated] Args for the post-processing script.
-
-  For create_bundle targets, post_processing_args is the list of arguments to
-  pass to the post-processing script. Typically you would use source expansion
-  (see "gn help source_expansion") to insert the source file names.
-
-  Deprecated: this is an old name for the "post_processing_args" property of
-  the "create_bundle" target. It is still supported to avoid breaking existing
-  build rules, but a warning will be emitted when it is used.
-
-  See also "gn help create_bundle" and "gn help post_processing_args".
-)";
-
-const char kCodeSigningOutputs[] = "code_signing_outputs";
-const char kCodeSigningOutputs_HelpShort[] =
-    "code_signing_outputs: [file list] [deprecated] Outputs of the "
-    "post-processing step.";
-const char kCodeSigningOutputs_Help[] =
-    R"(code_signing_outputs: [file list] [deprecated] Outputs of the post-processing step.
-
-  Outputs from the post-processing step of a create_bundle target. Must refer to
-  files in the build directory.
-
-  Deprecated: this is an old name for the "post_processing_outputs" property of
-  the "create_bundle" target. It is still supported to avoid breaking existing
-  build rules, but a warning will be emitted when it is used.
-
-  See also "gn help create_bundle" and "gn help post_processing_args".
-)";
-
-const char kCodeSigningScript[] = "code_signing_script";
-const char kCodeSigningScript_HelpShort[] =
-    "code_signing_script: [file name] [deprecated] Script for the "
-    "post-processing step.";
-const char kCodeSigningScript_Help[] =
-    R"(code_signing_script: [file name] [deprecated] Script for the post-processing step."
-
-  An absolute or buildfile-relative file name of a Python script to run for a
-  create_bundle target to perform the post-processing step.
-
-  Deprecated: this is an old name for the "post_processing_script" property of
-  the "create_bundle" target. It is still supported to avoid breaking existing
-  build rules, but a warning will be emitted when it is used.
-
-  See also "gn help create_bundle" and "gn help post_processing_args".
-)";
-
-const char kCodeSigningSources[] = "code_signing_sources";
-const char kCodeSigningSources_HelpShort[] =
-    "code_signing_sources: [file list] [deprecated] Sources for the "
-    "post-processing "
-    "step.";
-const char kCodeSigningSources_Help[] =
-    R"(code_signing_sources: [file list] [deprecated] Sources for the post-processing step.
-
-  A list of files used as input for the post-processing step of a create_bundle
-  target. Non-absolute paths will be resolved relative to the current build
-  file.
-
-  Deprecated: this is an old name for the "post_processing_sources" property of
-  the "create_bundle" target. It is still supported to avoid breaking existing
-  build rules, but a warning will be emitted when it is used.
-
-  See also "gn help create_bundle" and "gn help post_processing_args".
 )";
 
 const char kCompleteStaticLib[] = "complete_static_lib";
@@ -1457,7 +1401,8 @@ const char kLibDirs_Help[] =
   Specifies additional directories passed to the linker for searching for the
   required libraries. If an item is not an absolute path, it will be treated as
   being relative to the current build file.
-)" COMMON_LIB_INHERITANCE_HELP COMMON_ORDERING_HELP LIBS_AND_LIB_DIRS_ORDERING_HELP
+)" COMMON_LIB_INHERITANCE_HELP
+        COMMON_ORDERING_HELP LIBS_AND_LIB_DIRS_ORDERING_HELP
     R"(
 Example
 
@@ -1529,6 +1474,17 @@ Example
       my_files = [ "a.txt", "b.txt" ]
     }
   }
+)";
+
+const char kModuleName[] = "module_name";
+const char kModuleName_HelpShort[] =
+    "module_name: [string] The name for the compiled module.";
+const char kModuleName_Help[] =
+    R"(module_name: [string] The name for the compiled module.
+
+  Valid for binary targets that contain Swift sources, and for C++ modules.
+
+  If module_name is not set, then this rule will use the target name.
 )";
 
 const char kOutputExtension[] = "output_extension";
@@ -1728,6 +1684,19 @@ const char kPostProcessingArgs_Help[] =
   See also "gn help create_bundle".
 )";
 
+const char kPostProcessingManifest[] = "post_processing_manifest";
+const char kPostProcessingManifest_HelpShort[] =
+    "post_processing_manifest: [file] Name of the generated bundle manifest.";
+const char kPostProcessingManifest_Help[] =
+    R"(post_processing_manifest: [file] Name of the generated bundle manifest.
+
+  Path where a manifest listing all the files found in the bundle will be
+  written for the post processing step. The path must be outside of the
+  bundle_root_dir.
+
+  See also "gen help create_bundle".
+)";
+
 const char kPostProcessingOutputs[] = "post_processing_outputs";
 const char kPostProcessingOutputs_HelpShort[] =
     "post_processing_outputs: [file list] Outputs of the post-processing step.";
@@ -1882,7 +1851,7 @@ const char kPublic_Help[] =
   If no public files are declared, other targets (assuming they have visibility
   to depend on this target) can include any file in the sources list. If this
   variable is defined on a target, dependent targets may only include files on
-  this whitelist unless that target is marked as a friend (see "gn help
+  this allowlist unless that target is marked as a friend (see "gn help
   friend").
 
   Header file permissions are also subject to visibility. A target must be
@@ -2194,6 +2163,32 @@ Example
   }
 )";
 
+const char kTargetXcodePlatform[] = "target_xcode_platform";
+const char kTargetXcodePlatform_HelpShort[] =
+    "target_xcode_platform: [string] The desired platform for the build.";
+const char kTargetXcodePlatform_Help[] =
+    R"(target_xcode_platform: The desired platform for the build.
+
+  This value should be used to indicate the kind of iOS or iOS-based platform
+  that is being the desired platform for the primary object(s) of the build.
+
+  This should be set to the most specific value possible. So, "iphoneos" or
+  "tvos" should be used instead of "ios" where applicable, even though
+  iPhoneOS and tvOS are both iOS variants.
+
+  GN defaults this value to "iphoneos" and the configuration files should set
+  it to an appropriate value if it is not set via the command line or in the
+  args.gn file.
+
+  This value configures the base SDK and the targeted device families of the
+  generated Xcode project. only meaningful when generating with --ide=xcode.
+
+  Possible values
+
+  - "iphoneos"
+  - "tvos"
+)";
+
 const char kTestonly[] = "testonly";
 const char kTestonly_HelpShort[] =
     "testonly: [boolean] Declares a target must only be used for testing.";
@@ -2214,6 +2209,33 @@ Example
   source_set("test_support") {
     testonly = true
     ...
+  }
+)";
+
+const char kValidations[] = "validations";
+const char kValidations_HelpShort[] =
+    "validations: [label list] Validation dependencies.";
+const char kValidations_Help[] =
+    R"(validations: Validation dependencies.
+
+  A list of target labels.
+
+  "Validations" are a list of targets that should be built if the current
+  target is built, but which do not effect the result of the current target.
+  This is used to declare things like static analysis, style checking, or
+  other checks that should run in parallel with the build.
+
+Example
+
+  executable("my_program") {
+    sources = [ "my_program.cc" ]
+    validations = [ ":my_program_style_check" ]
+  }
+
+  action("my_program_style_check") {
+    script = "//tools/style_checker.py"
+    sources = [ "my_program.cc" ]
+    outputs = [ "$target_gen_dir/my_program_style_check.stamp" ]
   }
 )";
 
@@ -2310,6 +2332,27 @@ const char kWeakFrameworks_Help[] =
 Example
 
   weak_frameworks = [ "OnlyOnNewerOSes.framework" ]
+)";
+
+const char kWeakLibraries[] = "weak_libraries";
+const char kWeakLibraries_HelpShort[] =
+    "weak_libraries: [file list] File of libraries that must be weak linked.";
+const char kWeakLibraries_Help[] =
+    R"(weak_libraries: [file list] File of libraries that must be weak linked.
+
+  A list of library files.
+
+  The library files in that list will be weak linked with any dynamic link
+  type target. Weak linking instructs the dynamic loader to attempt to load
+  the library, but if it is not able to do so, it leaves any imported symbols
+  unresolved. This is typically used when a library is present in a new
+  version of an SDK but not on older versions of the OS that the software runs
+  on.
+)" COMMON_ORDERING_HELP
+    R"(
+Example
+
+  weak_libraries = [ rebase_path("//path/to/libOnlyOnNewerOSes.dylib") ]
 )";
 
 const char kWriteValueContents[] = "contents";
@@ -2426,10 +2469,6 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(CflagsObjC)
     INSERT_VARIABLE(CflagsObjCC)
     INSERT_VARIABLE(CheckIncludes)
-    INSERT_VARIABLE(CodeSigningArgs)
-    INSERT_VARIABLE(CodeSigningOutputs)
-    INSERT_VARIABLE(CodeSigningScript)
-    INSERT_VARIABLE(CodeSigningSources)
     INSERT_VARIABLE(CompleteStaticLib)
     INSERT_VARIABLE(Configs)
     INSERT_VARIABLE(Data)
@@ -2449,6 +2488,7 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(Libs)
     INSERT_VARIABLE(LibDirs)
     INSERT_VARIABLE(Metadata)
+    INSERT_VARIABLE(ModuleName)
     INSERT_VARIABLE(OutputDir)
     INSERT_VARIABLE(OutputExtension)
     INSERT_VARIABLE(OutputName)
@@ -2457,6 +2497,7 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(PartialInfoPlist)
     INSERT_VARIABLE(Pool)
     INSERT_VARIABLE(PostProcessingArgs)
+    INSERT_VARIABLE(PostProcessingManifest)
     INSERT_VARIABLE(PostProcessingOutputs)
     INSERT_VARIABLE(PostProcessingScript)
     INSERT_VARIABLE(PostProcessingSources)
@@ -2473,10 +2514,13 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(Sources)
     INSERT_VARIABLE(Swiftflags)
     INSERT_VARIABLE(XcodeTestApplicationName)
+    INSERT_VARIABLE(TargetXcodePlatform)
     INSERT_VARIABLE(Testonly)
+    INSERT_VARIABLE(Validations)
     INSERT_VARIABLE(Visibility)
     INSERT_VARIABLE(WalkKeys)
     INSERT_VARIABLE(WeakFrameworks)
+    INSERT_VARIABLE(WeakLibraries)
     INSERT_VARIABLE(WriteOutputConversion)
     INSERT_VARIABLE(WriteValueContents)
     INSERT_VARIABLE(WriteRuntimeDeps)

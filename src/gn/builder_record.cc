@@ -62,10 +62,45 @@ BuilderRecord::ItemType BuilderRecord::TypeOfItem(const Item* item) {
   return ITEM_UNKNOWN;
 }
 
+void BuilderRecord::AddDep(BuilderRecord* record) {
+  if (all_deps_.add(record) && !record->resolved()) {
+    unresolved_count_ += 1;
+    record->waiting_on_resolution_.add(this);
+  }
+}
+
 void BuilderRecord::AddGenDep(BuilderRecord* record) {
   // Records don't have to wait on resolution of their gen deps, since all they
   // need to do is propagate should_generate to them.
   all_deps_.insert(record);
+}
+
+void BuilderRecord::AddValidationDep(BuilderRecord* record) {
+  // Validation dependencies are treated differently than normal dependencies:
+  // 1. They are added to all_deps_ for graph traversal (should_generate
+  //    propagation) and error checking.
+  // 2. They block resolution ONLY if they are undefined (!item). This allows
+  //    cycles (A is validated by B, B depends on A) to resolve.
+  // 3. They block writing if they are unresolved. This prevents race conditions
+  //    where we might write the ninja file before the validation output path
+  //    is computed.
+  all_deps_.add(record);
+  if (validation_deps_.add(record)) {
+    if (!record->item()) {
+      unresolved_count_ += 1;
+      record->waiting_on_definition_.add(this);
+    }
+    if (!record->resolved()) {
+      unresolved_validation_count_ += 1;
+      record->waiting_on_resolution_for_writing_.add(this);
+    }
+  }
+}
+
+bool BuilderRecord::OnDefinedDep(const BuilderRecord* dep) {
+  DCHECK(all_deps_.contains(const_cast<BuilderRecord*>(dep)));
+  DCHECK(unresolved_count_ > 0);
+  return --unresolved_count_ == 0;
 }
 
 bool BuilderRecord::OnResolvedDep(const BuilderRecord* dep) {
@@ -74,21 +109,22 @@ bool BuilderRecord::OnResolvedDep(const BuilderRecord* dep) {
   return --unresolved_count_ == 0;
 }
 
+bool BuilderRecord::OnResolvedValidationDep(const BuilderRecord* dep) {
+  DCHECK(validation_deps_.contains(const_cast<BuilderRecord*>(dep)));
+  DCHECK(unresolved_validation_count_ > 0);
+  return --unresolved_validation_count_ == 0;
+}
+
 std::vector<const BuilderRecord*> BuilderRecord::GetSortedUnresolvedDeps()
     const {
   std::vector<const BuilderRecord*> result;
   for (auto it = all_deps_.begin(); it.valid(); ++it) {
     BuilderRecord* dep = *it;
-    if (dep->waiting_on_resolution_.contains(const_cast<BuilderRecord*>(this)))
+    if (dep->waiting_on_resolution_.contains(
+            const_cast<BuilderRecord*>(this)) ||
+        dep->waiting_on_definition_.contains(const_cast<BuilderRecord*>(this)))
       result.push_back(dep);
   }
   std::sort(result.begin(), result.end(), LabelCompare);
   return result;
-}
-
-void BuilderRecord::AddDep(BuilderRecord* record) {
-  if (all_deps_.add(record) && !record->resolved()) {
-    unresolved_count_ += 1;
-    record->waiting_on_resolution_.add(this);
-  }
 }

@@ -15,6 +15,7 @@
 #include "gn/source_file.h"
 #include "gn/substitution_list.h"
 #include "gn/target.h"
+#include "gn/test_with_scheduler.h"
 #include "gn/tool.h"
 #include "gn/toolchain.h"
 #include "util/test/test.h"
@@ -43,7 +44,7 @@ class MockLoader : public Loader {
   ~MockLoader() override = default;
 };
 
-class AnalyzerTest : public testing::Test {
+class AnalyzerTest : public TestWithScheduler {
  public:
   AnalyzerTest()
       : loader_(new MockLoader),
@@ -90,6 +91,8 @@ class AnalyzerTest : public testing::Test {
 
   void RunAnalyzerTest(const std::string& input,
                        const std::string& expected_output) {
+    // Wait for any async OnResolve() to happen.
+    scheduler().Run();
     Analyzer analyzer(builder_, SourceFile("//build/config/BUILDCONFIG.gn"),
                       SourceFile("//.gn"),
                       {SourceFile("//out/debug/args.gn"),
@@ -748,6 +751,49 @@ TEST_F(AnalyzerTest, TargetAlternateToolchainRefersToSources) {
       R"("compile_targets":[],)"
       R"/("status":"Found dependency",)/"
       R"/("test_targets":["//dir:target_name","//dir:target_name(//other:tc)"])/"
+      "}");
+}
+
+// Tests that a target is marked as affected if its validations are modified.
+TEST_F(AnalyzerTest, TargetRefersToValidations) {
+  std::unique_ptr<Target> t = MakeTarget("//dir", "target_name");
+  Target* t_raw = t.get();
+  std::unique_ptr<Target> v = MakeTarget("//dir", "validation_name");
+  Target* v_raw = v.get();
+  v_raw->set_output_type(Target::ACTION);
+  v_raw->action_values().set_script(SourceFile("//dir/other.py"));
+
+  t_raw->validations().push_back(LabelTargetPair(v.get()));
+
+  builder_.ItemDefined(std::move(t));
+  builder_.ItemDefined(std::move(v));
+
+  // Initially no dependency.
+  RunAnalyzerTest(
+      R"({
+       "files": [ "//dir/script.py" ],
+       "additional_compile_targets": [ "//dir:target_name" ],
+       "test_targets": []
+       })",
+      "{"
+      R"("compile_targets":[],)"
+      R"/("status":"No dependency",)/"
+      R"("test_targets":[])"
+      "}");
+
+  // Now change validation target to use the script.
+  v_raw->action_values().set_script(SourceFile("//dir/script.py"));
+
+  RunAnalyzerTest(
+      R"({
+       "files": [ "//dir/script.py" ],
+       "additional_compile_targets": [ "//dir:target_name" ],
+       "test_targets": []
+       })",
+      "{"
+      R"("compile_targets":["//dir:target_name"],)"
+      R"/("status":"Found dependency",)/"
+      R"("test_targets":[])"
       "}");
 }
 

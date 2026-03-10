@@ -543,7 +543,7 @@ bool VisualStudioWriter::WriteProjectFileContents(
 
   project.SubElement("PropertyGroup", XmlAttributes("Label", "UserMacros"));
 
-  std::string ninja_target = GetNinjaTarget(target);
+  auto [ninja_target, ninja_target_is_phony] = GetNinjaTarget(target);
   std::string ninja_exe = GetNinjaExecutable(ninja_executable);
 
   {
@@ -551,7 +551,7 @@ bool VisualStudioWriter::WriteProjectFileContents(
         project.SubElement("PropertyGroup");
     properties->SubElement("OutDir")->Text("$(SolutionDir)");
     properties->SubElement("TargetName")->Text("$(ProjectName)");
-    if (target->output_type() != Target::GROUP) {
+    if (target->output_type() != Target::GROUP && !ninja_target_is_phony) {
       properties->SubElement("TargetPath")->Text("$(OutDir)\\" + ninja_target);
     }
   }
@@ -928,13 +928,24 @@ void VisualStudioWriter::ResolveSolutionFolders() {
   }
 }
 
-std::string VisualStudioWriter::GetNinjaTarget(const Target* target) {
+std::pair<std::string, bool> VisualStudioWriter::GetNinjaTarget(
+    const Target* target) {
   std::ostringstream ninja_target_out;
-  DCHECK(!target->dependency_output_file().value().empty());
-  ninja_path_output_.WriteFile(ninja_target_out,
-                               target->dependency_output_file());
+  bool is_phony = false;
+  OutputFile output_file;
+  if (target->has_dependency_output_file()) {
+    output_file = target->dependency_output_file();
+  } else if (target->has_dependency_output_alias()) {
+    output_file = target->dependency_output_alias();
+    is_phony = true;
+  } else {
+    DCHECK(false);
+    return {"", false};
+  }
+
+  ninja_path_output_.WriteFile(ninja_target_out, output_file);
   std::string s = ninja_target_out.str();
   if (s.compare(0, 2, "./") == 0)
     s = s.substr(2);
-  return s;
+  return {s, is_phony};
 }
