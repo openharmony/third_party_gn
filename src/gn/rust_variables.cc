@@ -120,8 +120,7 @@ void InsertRustVariables(VariableInfoMap* info_map) {
       kRustCrateRoot,
       VariableInfo(kRustCrateRoot_HelpShort, kRustCrateRoot_Help)));
   info_map->insert(std::make_pair(
-      kRustflags,
-      VariableInfo(kRustflags_HelpShort, kRustflags_Help)));
+      kRustflags, VariableInfo(kRustflags_HelpShort, kRustflags_Help)));
 }
 
 }  // namespace variables

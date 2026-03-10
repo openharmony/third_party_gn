@@ -42,6 +42,20 @@ void BuildSettings::SetSecondarySourcePath(const SourceDir& d) {
   secondary_source_path_ = GetFullPath(d).NormalizePathSeparatorsTo('/');
 }
 
+void BuildSettings::SetPythonPath(base::FilePath p) {
+  python_path_ = std::move(p);
+  python_path_is_relative_to_build_dir_ = false;
+
+  // If the provided python path is absolute and is within the root source tree,
+  // make it relative to the build directory. This helps keep generated ninja
+  // files free of absolute paths when possible.
+  if (python_path_.IsAbsolute() && root_path_.IsParent(python_path_)) {
+    python_path_ = UTF8ToFilePath(
+        RebasePath(FilePathToUTF8(python_path_), build_dir_, root_path_utf8_));
+    python_path_is_relative_to_build_dir_ = true;
+  }
+}
+
 void BuildSettings::SetBuildDir(const SourceDir& d) {
   build_dir_ = d;
 }
@@ -150,6 +164,13 @@ bool BuildSettings::ResolveTargetLabelWithOhosComponent(const Value& arg,
         }
     }
     return false;
+}
+
+const BuildSettings::PrintCallback BuildSettings::swap_print_callback(
+    const BuildSettings::PrintCallback callback) {
+  auto temp = std::move(print_callback_);
+  print_callback_ = callback;
+  return temp;
 }
 
 bool BuildSettings::isOhosIndepCompilerEnable() const {

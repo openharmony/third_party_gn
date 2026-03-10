@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "base/strings/string_util.h"
+#include "gn/builtin_tool.h"
 #include "gn/config_values_extractors.h"
 #include "gn/deps_iterator.h"
 #include "gn/filesystem_utils.h"
@@ -18,7 +19,9 @@
 #include "gn/pool.h"
 #include "gn/settings.h"
 #include "gn/string_utils.h"
+#include "gn/substitution_writer.h"
 #include "gn/target.h"
+#include "gn/variables.h"
 
 namespace {
 
@@ -53,8 +56,9 @@ void NinjaBinaryTargetWriter::Run() {
   writer.Run();
 }
 
-std::vector<OutputFile> NinjaBinaryTargetWriter::WriteInputsStampAndGetDep(
-    size_t num_stamp_uses) const {
+std::vector<OutputFile>
+NinjaBinaryTargetWriter::WriteInputsStampOrPhonyAndGetDep(
+    size_t num_output_uses) const {
   CHECK(target_->toolchain()) << "Toolchain not set on target "
                               << target_->label().GetUserVisibleName(true);
 
@@ -68,8 +72,8 @@ std::vector<OutputFile> NinjaBinaryTargetWriter::WriteInputsStampAndGetDep(
   if (inputs.size() == 0)
     return std::vector<OutputFile>();  // No inputs
 
-  // If we only have one input, return it directly instead of writing a stamp
-  // file for it.
+  // If we only have one input, return it directly instead of writing a phony
+  // target for it.
   if (inputs.size() == 1) {
     return std::vector<OutputFile>{
         OutputFile(settings_->build_settings(), *inputs[0])};
@@ -79,22 +83,35 @@ std::vector<OutputFile> NinjaBinaryTargetWriter::WriteInputsStampAndGetDep(
   for (const SourceFile* source : inputs)
     outs.push_back(OutputFile(settings_->build_settings(), *source));
 
-  // If there are multiple inputs, but the stamp file would be referenced only
+  // If there are multiple inputs, but the phony target would be referenced only
   // once, don't write it but depend on the inputs directly.
-  if (num_stamp_uses == 1u)
+  if (num_output_uses == 1u)
     return outs;
 
-  // Make a stamp file.
-  OutputFile stamp_file =
-      GetBuildDirForTargetAsOutputFile(target_, BuildDirType::OBJ);
-  stamp_file.value().append(target_->label().name());
-  stamp_file.value().append(".inputs.stamp");
+  OutputFile stamp_or_phony;
+  std::string tool;
+  if (settings_->build_settings()->no_stamp_files()) {
+    // Make a phony target. We don't need to worry about an empty phony target,
+    // as those would have been peeled off already.
+    CHECK(!inputs.empty());
+    stamp_or_phony =
+        GetBuildDirForTargetAsOutputFile(target_, BuildDirType::PHONY);
+    stamp_or_phony.value().append(target_->label().name());
+    stamp_or_phony.value().append(".inputs");
+    tool = BuiltinTool::kBuiltinToolPhony;
+  } else {
+    // Make a stamp target.
+    stamp_or_phony =
+        GetBuildDirForTargetAsOutputFile(target_, BuildDirType::OBJ);
+    stamp_or_phony.value().append(target_->label().name());
+    stamp_or_phony.value().append(".inputs.stamp");
+    tool = GetNinjaRulePrefixForToolchain(settings_) +
+           GeneralTool::kGeneralToolStamp;
+  }
 
   out_ << "build ";
-  WriteOutput(stamp_file);
-
-  out_ << ": " << GetNinjaRulePrefixForToolchain(settings_)
-       << GeneralTool::kGeneralToolStamp;
+  WriteOutput(stamp_or_phony);
+  out_ << ": " << tool;
 
   // File inputs.
   for (const auto* input : inputs) {
@@ -103,7 +120,7 @@ std::vector<OutputFile> NinjaBinaryTargetWriter::WriteInputsStampAndGetDep(
   }
 
   out_ << std::endl;
-  return {stamp_file};
+  return {stamp_or_phony};
 }
 
 NinjaBinaryTargetWriter::ClassifiedDeps
@@ -171,7 +188,7 @@ void NinjaBinaryTargetWriter::ClassifyDependency(
       AddSourceSetFiles(dep, &classified_deps->extra_object_files);
 
     // Add the source set itself as a non-linkable dependency on the current
-    // target. This will make sure that anything the source set's stamp file
+    // target. This will make sure that anything the source set's phony target
     // depends on (like data deps) are also built before the current target
     // can be complete. Otherwise, these will be skipped since this target
     // will depend only on the source set's object files.
@@ -197,7 +214,10 @@ void NinjaBinaryTargetWriter::AddSourceSetFiles(
   // the tool if there are more than one.
   for (const auto& source : source_set->sources()) {
     const char* tool_name = Tool::kToolNone;
-    if (source_set->GetOutputFilesForSource(source, &tool_name, &tool_outputs))
+    // Do not add .pcm files as they are not object files linked to final
+    // binaries.
+    if (source.GetType() != SourceFile::SOURCE_MODULEMAP &&
+        source_set->GetOutputFilesForSource(source, &tool_name, &tool_outputs))
       obj_files->push_back(tool_outputs[0]);
   }
 
@@ -275,6 +295,7 @@ void NinjaBinaryTargetWriter::WriteCompilerBuildLine(
     out_ << " ||";
     path_output_.WriteFiles(out_, order_only_deps);
   }
+  WriteValidations();
   out_ << std::endl;
 
   if (!sources.empty() && can_write_source_info) {
@@ -384,6 +405,14 @@ void NinjaBinaryTargetWriter::WriteFrameworks(std::ostream& out,
   const auto& all_weak_frameworks = resolved().GetLinkedWeakFrameworks(target_);
   for (size_t i = 0; i < all_weak_frameworks.size(); i++) {
     weak_writer(all_weak_frameworks[i], out);
+  }
+
+  if (!tool->weak_library_switch().empty()) {
+    WeakLibrariesWriter weak_library_writer(tool->weak_library_switch());
+    const auto& all_weak_libraries = resolved().GetLinkedWeakLibraries(target_);
+    for (const auto& weak_library : all_weak_libraries) {
+      weak_library_writer(weak_library, out);
+    }
   }
 }
 
