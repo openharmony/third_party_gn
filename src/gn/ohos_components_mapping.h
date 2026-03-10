@@ -18,6 +18,7 @@ class OhosComponentMapping {
 public:
     static void Init(const std::string& build_dir)
     {
+        std::lock_guard<std::mutex> lock(instanceMutex_);
         if (instance_ != nullptr) {
             return;
         }
@@ -37,6 +38,7 @@ public:
 private:
     std::string build_dir_;
     static OhosComponentMapping *instance_;
+    static std::mutex instanceMutex_;  // 保护单例初始化的互斥锁
     OhosComponentMapping() {}
     OhosComponentMapping(const std::string &build_dir);
     OhosComponentMapping &operator = (const OhosComponentMapping &) = delete;

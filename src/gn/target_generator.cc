@@ -324,7 +324,6 @@ bool TargetGenerator::FillDependencies() {
       std::string label = target_->label().GetUserVisibleName(false);
 
       // 检查是否启用白名单调试模式
-      OhosComponentChecker* checker = OhosComponentChecker::getInstance();
       bool whitelistDebug = (checker && checker->IsWhitelistDebug());
 
       // 遍历所有 public_external_deps,检查是否都在白名单中
