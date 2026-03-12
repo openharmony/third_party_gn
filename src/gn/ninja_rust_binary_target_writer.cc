@@ -170,7 +170,9 @@ void NinjaRustBinaryTargetWriter::Run() {
     if (linkable_dep->source_types_used().RustSourceUsed() &&
         linkable_dep->rust_values().crate_type() != RustValues::CRATE_CDYLIB) {
       rustdeps.push_back(linkable_dep->link_output_file());
-    } else {
+    } else if(dep->copy_linkable_file()){
+      nonrustdeps.push_back(linkable_dep->link_output_file());
+    } else if(dep->copy_rust_file()){
       nonrustdeps.push_back(linkable_dep->link_output_file());
     }
     CHECK(linkable_dep->has_dependency_output_file());
