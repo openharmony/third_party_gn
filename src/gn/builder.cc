@@ -541,9 +541,8 @@ bool Builder::ResolveItem(BuilderRecord* record, Err* err) {
         !ResolvePool(target, err) || !ResolveToolchain(target, err))
       return false;
 
-    // Direct call to callback (synchronous, no async offloading to fix tcache issues)
-    if (record->resolved() && resolved_and_generated_callback_)
-      resolved_and_generated_callback_(record);
+    // Offload Target::OnResolved to a worker thread.
+    ScheduleTargetOnResolve(record);
     return true;
   } else if (record->type() == BuilderRecord::ITEM_CONFIG) {
     Config* config = record->item()->AsConfig();
@@ -750,3 +749,4 @@ std::string Builder::CheckForCircularDependencies(
 
   return ret;
 }
+
