@@ -111,10 +111,10 @@ NinjaRustBinaryTargetWriter::~NinjaRustBinaryTargetWriter() = default;
 void NinjaRustBinaryTargetWriter::Run() {
   DCHECK(target_->output_type() != Target::SOURCE_SET);
 
-  size_t num_output_uses = target_->sources().size();
+  size_t num_stamp_uses = target_->sources().size();
 
   std::vector<OutputFile> input_deps =
-      WriteInputsStampOrPhonyAndGetDep(num_output_uses);
+      WriteInputsStampOrPhonyAndGetDep(num_stamp_uses);
 
   WriteCompilerVars();
 
@@ -126,7 +126,7 @@ void NinjaRustBinaryTargetWriter::Run() {
   // but changes in the inputs deps won't cause the file to be recompiled. See
   // the comment on NinjaCBinaryTargetWriter::Run for more detailed explanation.
   std::vector<OutputFile> order_only_deps = WriteInputDepsStampOrPhonyAndGetDep(
-      std::vector<const Target*>(), num_output_uses);
+      std::vector<const Target*>(), num_stamp_uses);
   std::copy(input_deps.begin(), input_deps.end(),
             std::back_inserter(order_only_deps));
 
@@ -141,39 +141,33 @@ void NinjaRustBinaryTargetWriter::Run() {
 
   std::vector<OutputFile> rustdeps;
   std::vector<OutputFile> nonrustdeps;
-  std::vector<OutputFile> swiftmodules;
   nonrustdeps.insert(nonrustdeps.end(),
                      classified_deps.extra_object_files.begin(),
                      classified_deps.extra_object_files.end());
   for (const auto* framework_dep : classified_deps.framework_deps) {
-    if (framework_dep->has_dependency_output_file()) {
-      order_only_deps.push_back(framework_dep->dependency_output_file());
-    }
-  }
-  if (target_->IsFinal()) {
-    for (const Target* dep : classified_deps.swiftmodule_deps) {
-      swiftmodules.push_back(dep->swift_values().module_output_file());
-      order_only_deps.push_back(dep->swift_values().module_output_file());
-    }
+    order_only_deps.push_back(framework_dep->dependency_output_file());
   }
   for (const auto* non_linkable_dep : classified_deps.non_linkable_deps) {
-    if (non_linkable_dep->has_dependency_output()) {
-      if (non_linkable_dep->source_types_used().RustSourceUsed() &&
-          non_linkable_dep->output_type() != Target::SOURCE_SET) {
-        rustdeps.push_back(non_linkable_dep->dependency_output());
-      }
-      order_only_deps.push_back(non_linkable_dep->dependency_output());
+    if (non_linkable_dep->source_types_used().RustSourceUsed() &&
+        non_linkable_dep->output_type() != Target::SOURCE_SET) {
+      rustdeps.push_back(non_linkable_dep->dependency_output_file());
     }
+    order_only_deps.push_back(non_linkable_dep->dependency_output_file());
   }
+  std::vector<ExternCrate> transitive_crates;
+
   for (const auto* linkable_dep : classified_deps.linkable_deps) {
+    if (linkable_dep->copy_rust_file()) {
+      transitive_crates.push_back({linkable_dep, true});
+      continue;
+    }
     // Rust cdylibs are treated as non-Rust dependencies for linking purposes.
-    if (linkable_dep->source_types_used().RustSourceUsed() &&
-        linkable_dep->rust_values().crate_type() != RustValues::CRATE_CDYLIB) {
+    if ((linkable_dep->source_types_used().RustSourceUsed() &&
+        linkable_dep->rust_values().crate_type() != RustValues::CRATE_CDYLIB) || linkable_dep->copy_rust_file()) {
       rustdeps.push_back(linkable_dep->link_output_file());
     } else {
       nonrustdeps.push_back(linkable_dep->link_output_file());
     }
-    CHECK(linkable_dep->has_dependency_output_file());
     implicit_deps.push_back(linkable_dep->dependency_output_file());
   }
 
@@ -191,14 +185,13 @@ void NinjaRustBinaryTargetWriter::Run() {
   // Collect the full transitive set of rust libraries that this target depends
   // on, and the public flag represents if the target has direct access to the
   // dependency through a chain of public_deps.
-  std::vector<ExternCrate> transitive_crates;
   for (const auto& inherited : resolved().GetRustInheritedLibraries(target_)) {
     const Target* dep = inherited.target();
     bool has_direct_access = inherited.is_public();
     // We will tell rustc to look for crate metadata for any rust crate
     // dependencies except cdylibs, as they have no metadata present.
-    if (dep->source_types_used().RustSourceUsed() &&
-        RustValues::IsRustLibrary(dep)) {
+    if ((dep->source_types_used().RustSourceUsed() &&
+        RustValues::IsRustLibrary(dep)) || dep->copy_rust_file()) {
       transitive_crates.push_back({dep, has_direct_access});
       // If the current crate can directly acccess the `dep` crate, then the
       // current crate needs an implicit dependency on `dep` so it will be
@@ -206,6 +199,8 @@ void NinjaRustBinaryTargetWriter::Run() {
       if (has_direct_access) {
         implicit_deps.push_back(dep->dependency_output_file());
       }
+    } else if(dep->copy_linkable_file()){
+      nonrustdeps.push_back(dep->link_output_file());
     }
   }
 
@@ -222,8 +217,7 @@ void NinjaRustBinaryTargetWriter::Run() {
             classified_deps.non_linkable_deps.end(),
             std::back_inserter(extern_deps));
 
-  WriteExternsAndDeps(extern_deps, transitive_crates, rustdeps, nonrustdeps,
-                      swiftmodules);
+  WriteExternsAndDeps(extern_deps, transitive_crates, rustdeps, nonrustdeps);
   WriteSourcesAndInputs();
   WritePool(out_);
 }
@@ -272,8 +266,7 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
     const std::vector<const Target*>& deps,
     const std::vector<ExternCrate>& transitive_rust_deps,
     const std::vector<OutputFile>& rustdeps,
-    const std::vector<OutputFile>& nonrustdeps,
-    const std::vector<OutputFile>& swiftmodules) {
+    const std::vector<OutputFile>& nonrustdeps) {
   // Writes a external LibFile which comes from user-specified externs, and may
   // be either a string or a SourceFile.
   auto write_extern_lib_file = [this](std::string_view crate_name,
@@ -303,7 +296,9 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
     out_ << " --extern ";
     out_ << crate_name;
     out_ << "=";
-    path_output_.WriteFile(out_, dep.dependency_output_file());
+    path_output_.WriteFile(out_, dep.copy_rust_file()
+                                     ? dep.link_output_file()
+                                     : dep.dependency_output_file());
   };
 
   // Write accessible crates with `--extern` to add them to the extern prelude.
@@ -334,15 +329,18 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
   // will only search the paths specified to -Ldependency, thus D needs to
   // appear as both a --extern (for A) and -Ldependency (for B and C).
   for (const auto& crate : transitive_rust_deps) {
-    const OutputFile& rust_lib = crate.target->dependency_output_file();
+    const OutputFile& rust_lib = crate.target->copy_rust_file()
+                                     ? crate.target->link_output_file()
+                                     : crate.target->dependency_output_file();
     if (emitted_rust_libs.count(rust_lib) == 0) {
       if (crate.has_direct_access) {
         write_extern_target(*crate.target);
       }
       emitted_rust_libs.insert(rust_lib);
     }
-    private_extern_dirs.push_back(
-        rust_lib.AsSourceFile(settings_->build_settings()).GetDir());
+    const SourceDir& dir =
+        rust_lib.AsSourceFile(settings_->build_settings()).GetDir();
+    private_extern_dirs.push_back(dir);
   }
 
   // Add explicitly specified externs from the GN target.
@@ -360,6 +358,20 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
     // TODO: switch to using `--extern priv:name` after stabilization.
     out_ << " -Ldependency=";
     path_output_.WriteDir(out_, dir, PathOutput::DIR_NO_LAST_SLASH);
+  }
+
+  UniqueVector<SourceDir> nonrustdep_dirs;
+
+  // Non-Rust native dependencies. A dependency from Rust implies the ability
+  // to specify it in #[link], and GN will ensure that rustc can find it by
+  // adding it to the native library search paths.
+  for (const auto& nonrustdep : nonrustdeps) {
+    nonrustdep_dirs.push_back(
+        nonrustdep.AsSourceFile(settings_->build_settings()).GetDir());
+  }
+  for (const auto& nonrustdep_dir : nonrustdep_dirs) {
+    out_ << " -Lnative=";
+    path_output_.WriteDir(out_, nonrustdep_dir, PathOutput::DIR_NO_LAST_SLASH);
   }
 
   // If rustc will invoke a linker, then pass linker arguments to include those
@@ -382,8 +394,6 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
   // If rustc will invoke a linker, all libraries need the passed through to the
   // linker.
   WriteLibs(out_, tool_);
-  WriteFrameworks(out_, tool_);
-  WriteSwiftModules(out_, tool_, swiftmodules);
 
   out_ << std::endl;
   out_ << "  ldflags =";
@@ -393,3 +403,4 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
 
   out_ << std::endl;
 }
+
