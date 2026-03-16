@@ -393,4 +393,3 @@ void NinjaRustBinaryTargetWriter::WriteExternsAndDeps(
 
   out_ << std::endl;
 }
-
