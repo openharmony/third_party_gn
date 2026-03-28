@@ -98,7 +98,7 @@ bool Visibility::CheckItemVisibility(const Item *from, const Item *to, bool is_e
     std::string from_label = from->label().GetUserVisibleName(false);
     if (!to->visibility().CanSeeMe(from->label())) {
         *err = Err(from->defined_from(), "Dependency not allowed.",
-            "The item " + from->label().GetUserVisibleName(false) +
+            "The item " + from_label +
             "\n"
             "can not depend on " +
             to_label +

@@ -696,10 +696,16 @@ void NinjaBuildWriter::WritePhonyRule(const Target* target,
   // Escape for special chars Ninja will handle.
   std::string escaped = EscapeString(phony_name, ninja_escape, nullptr);
 
+  // If the target doesn't have a dependency_output(), we should
+  // still emit the phony rule, but with no dependencies. This allows users to
+  // continue to use the phony rule, but it will effectively be a no-op.
   out_ << "build " << escaped << ": phony ";
-  path_output_.WriteFile(out_, target->dependency_output_file());
+  if (target->has_dependency_output()) {
+    path_output_.WriteFile(out_, target->dependency_output());
+  }
   out_ << std::endl;
 }
+
 
 void NinjaBuildWriter::WritePreciseTarget() {
   // Try to open precise_targets.txt file

@@ -467,6 +467,19 @@ bool Builder::AddToolchainDep(BuilderRecord* record,
   return true;
 }
 
+bool Builder::AddValidationDeps(BuilderRecord* record,
+                                const LabelTargetVector& targets,
+                                Err* err) {
+  for (const auto& target : targets) {
+    BuilderRecord* dep_record = GetOrCreateRecordOfType(
+        target.label, target.origin, BuilderRecord::ITEM_TARGET, err);
+    if (!dep_record)
+      return false;
+    record->AddValidationDep(dep_record);
+  }
+  return true;
+}
+
 void Builder::RecursiveSetShouldGenerate(BuilderRecord* record, bool force) {
   if (!record->should_generate()) {
     // This function can encounter cycles because gen_deps aren't a DAG. Setting
@@ -475,8 +488,7 @@ void Builder::RecursiveSetShouldGenerate(BuilderRecord* record, bool force) {
     record->set_should_generate(true);
 
     // This may have caused the item to go into "resolved and generated" state.
-    if (record->resolved() && resolved_and_generated_callback_)
-      resolved_and_generated_callback_(record);
+    CheckAndTriggerWrite(record);
   } else if (!force) {
     return;  // Already set and we're not required to iterate dependencies.
   }
@@ -500,9 +512,11 @@ bool Builder::ResolveItem(BuilderRecord* record, Err* err) {
 
   if (record->type() == BuilderRecord::ITEM_TARGET) {
     Target* target = record->item()->AsTarget();
+    // All deps must be resolved before OnResolved can be called.
     if (!ResolveDeps(&target->public_deps(), err) ||
         !ResolveDeps(&target->private_deps(), err) ||
         !ResolveDeps(&target->data_deps(), err) ||
+        !ResolveValidationDeps(&target->validations(), err) ||
         !ResolveConfigs(&target->configs(), err) ||
         !ResolveConfigs(&target->all_dependent_configs(), err) ||
         !ResolveConfigs(&target->public_configs(), err) ||
@@ -522,13 +536,43 @@ bool Builder::ResolveItem(BuilderRecord* record, Err* err) {
     if (!ResolvePools(toolchain, err))
       return false;
   }
-
-  record->set_resolved(true);
-
   if (!record->item()->OnResolved(err))
     return false;
-  if (record->should_generate() && resolved_and_generated_callback_)
-    resolved_and_generated_callback_(record);
+
+  return CompleteItemResolution(record, err);
+}
+
+void Builder::ScheduleTargetOnResolve(BuilderRecord* record) {
+  DCHECK(g_scheduler);
+
+  g_scheduler->IncrementWorkCount();
+  g_scheduler->ScheduleWork([this, record]() {
+    Err err;
+    bool success = record->item()->AsTarget()->OnResolved(&err);
+    DCHECK(success == !err.has_error());
+
+    g_scheduler->task_runner()->PostTask(
+        [this, record, err]() { CompleteAsyncTargetResolution(record, err); });
+  });
+}
+
+void Builder::CompleteAsyncTargetResolution(BuilderRecord* record,
+                                            const Err& err) {
+  if (err.has_error()) {
+    g_scheduler->FailWithError(err);
+  } else {
+    Err next_err;
+    if (!CompleteItemResolution(record, &next_err)) {
+      g_scheduler->FailWithError(next_err);
+    }
+  }
+  g_scheduler->DecrementWorkCount();
+}
+
+bool Builder::CompleteItemResolution(BuilderRecord* record, Err* err) {
+  record->set_resolved(true);
+
+  CheckAndTriggerWrite(record);
 
   // Recursively update everybody waiting on this item to be resolved.
   const BuilderRecordSet waiting_deps = record->waiting_on_resolution();
@@ -540,6 +584,7 @@ bool Builder::ResolveItem(BuilderRecord* record, Err* err) {
     }
   }
   record->waiting_on_resolution().clear();
+
   return true;
 }
 
@@ -551,6 +596,34 @@ bool Builder::ResolveDeps(LabelTargetVector* deps, Err* err) {
         cur.label, cur.origin, BuilderRecord::ITEM_TARGET, err);
     if (!record)
       return false;
+    cur.ptr = record->item()->AsTarget();
+  }
+  return true;
+}
+
+bool Builder::ResolveValidationDeps(LabelTargetVector* deps, Err* err) {
+  for (LabelTargetPair& cur : *deps) {
+    DCHECK(!cur.ptr);
+
+    // We only need the item to be defined, not resolved.
+    BuilderRecord* record = GetRecord(cur.label);
+    if (!record || !record->item()) {
+      *err = Err(cur.origin, "Item not found",
+                 "\"" + cur.label.GetUserVisibleName(true) +
+                     "\" doesn't\n"
+                     "refer to an existent thing.");
+      return false;
+    }
+
+    if (!BuilderRecord::IsItemOfType(record->item(),
+                                     BuilderRecord::ITEM_TARGET)) {
+      *err =
+          Err(cur.origin, "This is not a target",
+              "\"" + cur.label.GetUserVisibleName(true) + "\" refers to a " +
+                  record->item()->GetItemTypeName() + " instead of a target.");
+      return false;
+    }
+
     cur.ptr = record->item()->AsTarget();
   }
   return true;
@@ -622,6 +695,13 @@ bool Builder::ResolvePools(Toolchain* toolchain, Err* err) {
   return true;
 }
 
+void Builder::CheckAndTriggerWrite(BuilderRecord* record) {
+  if (record->resolved() && record->should_generate() && record->can_write() &&
+      resolved_and_generated_callback_) {
+    resolved_and_generated_callback_(record);
+  }
+}
+
 std::string Builder::CheckForCircularDependencies(
     const std::vector<const BuilderRecord*>& bad_records) const {
   std::vector<const BuilderRecord*> cycle;
@@ -639,3 +719,4 @@ std::string Builder::CheckForCircularDependencies(
 
   return ret;
 }
+

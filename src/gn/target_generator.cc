@@ -106,7 +106,7 @@ void TargetGenerator::GenerateTarget(Scope* scope,
     g_scheduler->Log("Defining target", label.GetUserVisibleName(true));
 
   std::unique_ptr<Target> target = std::make_unique<Target>(
-      scope->settings(), label, scope->build_dependency_files());
+      scope->settings(), label, scope->CollectBuildDependencyFiles());
   target->set_defined_from(function_call);
 
   // Create and call out to the proper generator.
@@ -324,7 +324,6 @@ bool TargetGenerator::FillDependencies() {
       std::string label = target_->label().GetUserVisibleName(false);
 
       // 检查是否启用白名单调试模式
-      OhosComponentChecker* checker = OhosComponentChecker::getInstance();
       bool whitelistDebug = (checker && checker->IsWhitelistDebug());
 
       // 遍历所有 public_external_deps,检查是否都在白名单中
