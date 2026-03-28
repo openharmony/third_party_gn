@@ -27,8 +27,10 @@
 static const std::string MAPPING_FILE_PATH = "component_mapping.json";
 
 OhosComponentMapping *OhosComponentMapping::instance_ = nullptr;
+std::mutex OhosComponentMapping::instanceMutex_;
 
 static std::map<std::string, std::string> gni_mapping_file_map_;
+static std::mutex gni_mapping_file_map_mutex_;  // 保护 gni_mapping_file_map_ 的互斥锁
 
 static bool StartWith(const std::string &str, const std::string &prefix)
 {
@@ -54,6 +56,7 @@ static bool ReadBuildConfigFile(base::FilePath path, std::string &content)
 
 static void LoadGniMappingFileMap(const base::Value &value)
 {
+    std::lock_guard<std::mutex> lock(gni_mapping_file_map_mutex_);
     for (auto info : value.DictItems()) {
         gni_mapping_file_map_[info.first] = info.second.GetString();
     }
@@ -142,5 +145,12 @@ const std::string OhosComponentMapping::MappingImportOther(const BuildSettings *
     if (StartWith(deps, component->path())) {
         return "";
     }
-    return GetRealImportFile(settings, gni_mapping_file_map_[deps]);
+
+    // 使用互斥锁保护对 gni_mapping_file_map_ 的访问
+    std::lock_guard<std::mutex> lock(gni_mapping_file_map_mutex_);
+    auto it = gni_mapping_file_map_.find(deps);
+    if (it != gni_mapping_file_map_.end()) {
+        return GetRealImportFile(settings, it->second);
+    }
+    return "";
 }

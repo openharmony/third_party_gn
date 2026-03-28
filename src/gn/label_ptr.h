@@ -15,22 +15,22 @@ class Config;
 class ParseNode;
 class Target;
 
-// Structure that holds a labeled "thing". This is used for various places
+// Structure that holds a labeled "thing". This is used in various places
 // where we need to store lists of targets or configs. We sometimes populate
-// the pointers on another thread from where we compute the labels, so this
-// structure lets us save them separately. This also allows us to store the
-// location of the thing that added this dependency.
+// pointers on another thread from where we compute labels, so this
+// structure lets us save them separately. This also allows us to store
+// location of thing that added this dependency.
 template <typename T>
 struct LabelPtrPair {
   using DestType = T;
 
   LabelPtrPair() = default;
 
-  explicit LabelPtrPair(const Label& l) : label(l) {}
+  explicit LabelPtrPair(const Label& l) : label(l), is_external_deps(false) {}
 
   // This constructor is typically used in unit tests, it extracts the label
   // automatically from a given pointer.
-  explicit LabelPtrPair(const T* p) : label(p->label()), ptr(p) {}
+  explicit LabelPtrPair(const T* p) : label(p->label()), is_external_deps(false) {}
 
   ~LabelPtrPair() = default;
 
@@ -46,15 +46,14 @@ struct LabelPtrPair {
 
 using LabelConfigPair = LabelPtrPair<Config>;
 using LabelTargetPair = LabelPtrPair<Target>;
-
 using LabelConfigVector = std::vector<LabelConfigPair>;
 using LabelTargetVector = std::vector<LabelTargetPair>;
 
 // Default comparison operators -----------------------------------------------
 //
-// The default hash and comparison operators operate on the label, which should
-// always be valid, whereas the pointer is sometimes null.
-
+// The default hash and comparison operators operate on label, which should
+// always be valid, whereas pointer is sometimes null.
+//
 template <typename T>
 inline bool operator==(const LabelPtrPair<T>& a, const LabelPtrPair<T>& b) {
   return a.label == b.label;
@@ -78,3 +77,4 @@ struct hash<LabelPtrPair<T>> {
 }  // namespace std
 
 #endif  // TOOLS_GN_LABEL_PTR_H_
+

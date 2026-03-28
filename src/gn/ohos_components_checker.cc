@@ -44,6 +44,7 @@ static std::map<std::string, std::vector<std::string>> deps_component_not_declar
 static std::map<std::string, std::vector<std::string>> external_deps_inner_;
 
 OhosComponentChecker *OhosComponentChecker::instance_ = nullptr;
+std::mutex OhosComponentChecker::instanceMutex_;
 
 static std::string& Trim(std::string &str)
 {
@@ -1101,6 +1102,9 @@ void OhosComponentChecker::AddToInterceptedList(const std::string &category, con
         return;
     }
 
+    // 使用互斥锁保护对拦截列表的访问
+    std::lock_guard<std::mutex> lock(interceptedListMutex_);
+
     // 判断是简单列表类型还是字典类型
     // 简单列表类型: all_dependent_configs, includes_over_range, innerapi_not_lib, innerapi_not_declare
     // 字典类型: innerapi_public_deps_inner, public_deps, lib_dirs, includes_absolute_deps_other, target_absolute_deps_other,
@@ -1126,6 +1130,9 @@ void OhosComponentChecker::AddToInterceptedList(const std::string &category, con
 
 void OhosComponentChecker::WriteInterceptedListToFile() const
 {
+    // 使用互斥锁保护对拦截列表的访问
+    std::lock_guard<std::mutex> lock(interceptedListMutex_);
+
     std::string outputPath = build_dir_ + "/intercepted_target_list.json";
 
     // 构建 JSON 值

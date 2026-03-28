@@ -47,3 +47,4 @@ class NinjaRustBinaryTargetWriter : public NinjaBinaryTargetWriter {
 };
 
 #endif  // TOOLS_GN_NINJA_RUST_BINARY_TARGET_WRITER_H_
+

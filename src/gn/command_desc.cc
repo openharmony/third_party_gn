@@ -266,6 +266,7 @@ using DescHandlerFunc = void (*)(const std::string& name,
 std::map<std::string, DescHandlerFunc> GetHandlers() {
   return {{"type", LabelHandler},
           {"toolchain", LabelHandler},
+          {variables::kValidations, DefaultHandler},
           {variables::kVisibility, VisibilityHandler},
           {variables::kMetadata, MetadataHandler},
           {variables::kTestonly, DefaultHandler},
@@ -303,6 +304,7 @@ std::map<std::string, DescHandlerFunc> GetHandlers() {
           {variables::kRebase, DefaultHandler},
           {variables::kWalkKeys, DefaultHandler},
           {variables::kWeakFrameworks, DefaultHandler},
+          {variables::kWeakLibraries, DefaultHandler},
           {variables::kWriteOutputConversion, DefaultHandler},
           {variables::kRustCrateName, DefaultHandler},
           {variables::kRustCrateRoot, DefaultHandler},
@@ -396,6 +398,7 @@ bool PrintTarget(const Target* target,
   HandleProperty(variables::kPrecompiledHeader, handler_map, v, dict);
   HandleProperty(variables::kPrecompiledSource, handler_map, v, dict);
   HandleProperty(variables::kDeps, handler_map, v, dict);
+  HandleProperty(variables::kValidations, handler_map, v, dict);
   HandleProperty(variables::kLibs, handler_map, v, dict);
   HandleProperty(variables::kLibDirs, handler_map, v, dict);
   HandleProperty(variables::kDataKeys, handler_map, v, dict);
@@ -403,6 +406,7 @@ bool PrintTarget(const Target* target,
   HandleProperty(variables::kRustflags, handler_map, v, dict);
   HandleProperty(variables::kWalkKeys, handler_map, v, dict);
   HandleProperty(variables::kWeakFrameworks, handler_map, v, dict);
+  HandleProperty(variables::kWeakLibraries, handler_map, v, dict);
   HandleProperty(variables::kWriteOutputConversion, handler_map, v, dict);
 
 #undef HandleProperty
@@ -467,6 +471,7 @@ bool PrintConfig(const Config* config,
   HandleProperty(variables::kPrecompiledSource, handler_map, v, dict);
   HandleProperty(variables::kRustflags, handler_map, v, dict);
   HandleProperty(variables::kWeakFrameworks, handler_map, v, dict);
+  HandleProperty(variables::kWeakLibraries, handler_map, v, dict);
 
 #undef HandleProperty
 
@@ -526,9 +531,11 @@ Possibilities for <what to show>
   script
   sources
   testonly
+  validations
   visibility
   walk_keys
   weak_frameworks
+  weak_libraries
 
   runtime_deps
       Compute all runtime deps for the given target. This is a computed list
@@ -623,6 +630,25 @@ Examples
       each one was set from.
 )";
 
+class PrintCallbackHolder {
+ public:
+  PrintCallbackHolder() {}
+  ~PrintCallbackHolder() {
+    if (_settings.has_value()) {
+      _settings.value()->swap_print_callback(_callback.value());
+    }
+  }
+  void SwapCallbacks(BuildSettings* settings,
+                     BuildSettings::PrintCallback new_callback) {
+    _settings = settings;
+    _callback = settings->swap_print_callback(new_callback);
+  }
+
+ private:
+  std::optional<BuildSettings*> _settings;
+  std::optional<BuildSettings::PrintCallback> _callback;
+};
+
 int RunDesc(const std::vector<std::string>& args) {
   if (args.size() != 2 && args.size() != 3) {
     Err(Location(), "Unknown command format. See \"gn help desc\"",
@@ -634,6 +660,16 @@ int RunDesc(const std::vector<std::string>& args) {
 
   // Deliberately leaked to avoid expensive process teardown.
   Setup* setup = new Setup;
+
+  bool json = cmdline->GetSwitchValueString("format") == "json";
+  PrintCallbackHolder print_callback_holder;
+  if (json) {
+    // Silence all output while running desc if outputting to json.
+    BuildSettings* settings = &setup->build_settings();
+    print_callback_holder.SwapCallbacks(settings,
+                                        [](const std::string& str) {});
+  }
+
   if (!setup->DoSetup(args[0], false))
     return 1;
   if (!setup->Run())
@@ -656,8 +692,6 @@ int RunDesc(const std::vector<std::string>& args) {
   std::string what_to_print;
   if (args.size() == 3)
     what_to_print = args[2];
-
-  bool json = cmdline->GetSwitchValueString("format") == "json";
 
   if (target_matches.empty() && config_matches.empty()) {
     OutputString(

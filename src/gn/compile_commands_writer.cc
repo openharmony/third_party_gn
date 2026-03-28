@@ -15,10 +15,14 @@
 #include "gn/config_values_extractors.h"
 #include "gn/deps_iterator.h"
 #include "gn/escape.h"
+#include "gn/ninja_module_writer_util.h"
 #include "gn/ninja_target_command_util.h"
 #include "gn/path_output.h"
+#include "gn/resolved_target_data.h"
 #include "gn/string_output_buffer.h"
+#include "gn/substitution_list.h"
 #include "gn/substitution_writer.h"
+#include "gn/unique_vector.h"
 
 // Structure of JSON output file
 // [
@@ -49,6 +53,8 @@ struct CompileFlags {
   std::string cflags_objcc;
   std::string framework_dirs;
   std::string frameworks;
+  std::string clang_module_deps;
+  std::string clang_module_deps_no_self;
 };
 
 // Helper template function to call RecursiveTargetConfigToStream<std::string>
@@ -71,6 +77,7 @@ std::string FlagsGetter(RecursiveWriterConfig config,
 void SetupCompileFlags(const Target* target,
                        PathOutput& path_output,
                        EscapeOptions opts,
+                       const ResolvedTargetData& resolved,
                        CompileFlags& flags) {
   bool has_precompiled_headers =
       target->config_values().has_precompiled_headers();
@@ -93,6 +100,29 @@ void SetupCompileFlags(const Target* target,
   flags.includes = FlagsGetter<SourceDir>(kRecursiveWriterSkipDuplicates,
                                           target, &ConfigValues::include_dirs,
                                           IncludeWriter(path_output));
+
+  std::vector<ClangModuleDep> module_dep_info =
+      GetModuleDepsInformation(target, resolved);
+  if (!module_dep_info.empty()) {
+    std::ostringstream module_deps_out;
+    for (const auto& module_dep : module_dep_info) {
+      module_deps_out << " -fmodule-file=" << module_dep.module_name << "=";
+      path_output.WriteFile(module_deps_out, module_dep.pcm);
+    }
+    base::EscapeJSONString(module_deps_out.str(), false,
+                           &flags.clang_module_deps);
+
+    std::ostringstream module_deps_no_self_out;
+    for (const auto& module_dep : module_dep_info) {
+      if (!module_dep.is_self) {
+        module_deps_no_self_out << " -fmodule-file=" << module_dep.module_name
+                                << "=";
+        path_output.WriteFile(module_deps_no_self_out, module_dep.pcm);
+      }
+    }
+    base::EscapeJSONString(module_deps_no_self_out.str(), false,
+                           &flags.clang_module_deps_no_self);
+  }
 
   // Helper lambda to call WriteOneFlag() and return the resulting
   // escaped JSON string.
@@ -177,6 +207,10 @@ void WriteCommand(const Target* target,
       out << flags.frameworks;
     } else if (range.type == &CSubstitutionIncludeDirs) {
       out << flags.includes;
+    } else if (range.type == &CSubstitutionModuleDeps) {
+      out << flags.clang_module_deps;
+    } else if (range.type == &CSubstitutionModuleDepsNoSelf) {
+      out << flags.clang_module_deps_no_self;
     } else if (range.type == &CSubstitutionCFlags) {
       out << flags.cflags;
     } else if (range.type == &CSubstitutionCFlagsC) {
@@ -233,6 +267,7 @@ void OutputJSON(const BuildSettings* build_settings,
 
   EscapeOptions opts;
   opts.mode = ESCAPE_NINJA_PREFORMATTED_COMMAND;
+  ResolvedTargetData resolved;
 
   for (const auto* target : all_targets) {
     if (!target->IsBinary())
@@ -247,7 +282,7 @@ void OutputJSON(const BuildSettings* build_settings,
         ESCAPE_NINJA_COMMAND);
 
     CompileFlags flags;
-    SetupCompileFlags(target, path_output, opts, flags);
+    SetupCompileFlags(target, path_output, opts, resolved, flags);
 
     for (const auto& source : target->sources()) {
       // If this source is not a C/C++/ObjC/ObjC++ source (not header) file,
@@ -406,16 +441,17 @@ std::vector<const Target*> CompileCommandsWriter::CollectDepsOfMatches(
 std::vector<const Target*> CompileCommandsWriter::FilterLegacyTargets(
     const std::vector<const Target*>& all_targets,
     const std::string& target_filter_string) {
-  std::set<std::string> target_filters_set;
-  for (auto& target :
-       base::SplitString(target_filter_string, ",", base::TRIM_WHITESPACE,
-                         base::SPLIT_WANT_NONEMPTY)) {
-    target_filters_set.insert(target);
-  }
+  std::vector<std::string> target_filters =
+      base::SplitString(target_filter_string, ",", base::TRIM_WHITESPACE,
+                        base::SPLIT_WANT_NONEMPTY);
+  UniqueVector<std::string> target_filters_set;
+  target_filters_set.reserve(target_filters.size());
+  target_filters_set.Append(std::move(target_filters));
 
   std::vector<const Target*> result;
+  result.reserve(all_targets.size());
   for (auto& target : all_targets) {
-    if (target_filters_set.count(target->label().name()))
+    if (target_filters_set.Contains(target->label().name()))
       result.push_back(target);
   }
 

@@ -63,6 +63,10 @@ const char kDotfile_Help[] =
 
     gn gen out/Debug --root=/home/build --dotfile=/home/my_gn_file.gn
 
+  The system variable `gn_version` is available in the dotfile, but none of
+  the other variables are, because the dotfile is processed before args.gn
+  or anything else is processed.
+
 Variables
 
   arg_file_template [optional]
@@ -102,7 +106,7 @@ Variables
       default. They can be checked explicitly by running
       "gn check --check-system" or "gn gen --check=system"
 
-  exec_script_whitelist [optional]
+  exec_script_allowlist [optional]
       A list of .gn/.gni files (not labels) that have permission to call the
       exec_script function. If this list is defined, calls to exec_script will
       be checked against this list and GN will fail if the current file isn't
@@ -116,10 +120,16 @@ Variables
       If unspecified, the ability to call exec_script is unrestricted.
 
       Example:
-        exec_script_whitelist = [
+        exec_script_allowlist = [
           "//base/BUILD.gn",
           "//build/my_config.gni",
         ]
+
+  exec_script_whitelist [optional]
+      A synonym for "exec_script_allowlist" that exists for backwards
+      compatibility. New code should use "exec_script_allowlist" instead.
+      If both values are set, only the value in "exec_script_allowlist" will
+      have any effect (so don't set both!).
 
   export_compile_commands [optional]
       A list of label patterns for which to generate a Clang compilation
@@ -206,6 +216,11 @@ Variables
       When set specifies the minimum required version of Ninja. The default
       required version is 1.7.2. Specifying a higher version might enable the
       use of some of newer features that can make the build more efficient.
+	  
+  no_stamp_files [optional]
+      A boolean flag that can be set to generate Ninja files that use phony
+      rules instead of stamp files whenever possible. This results in smaller
+      Ninja build plans, but requires at least Ninja 1.11.
   
   ohos_components_support [optional]
         This parameter enable support for OpenHarmony components.
@@ -410,6 +425,9 @@ Setup::Setup()
       dotfile_settings_(&build_settings_, std::string()),
       dotfile_scope_(&dotfile_settings_) {
   dotfile_settings_.set_toolchain_label(Label());
+
+  dotfile_provider_ =
+      std::make_unique<ScopePerFileProvider>(&dotfile_scope_, false, true);
 
   build_settings_.set_item_defined_callback(
       [task_runner = scheduler_.task_runner(),
@@ -715,10 +733,8 @@ bool Setup::FillArgsFromArgsInputFile(Err* err) {
   }
 
   Scope arg_scope(&dotfile_settings_);
-  // Set soure dir so relative imports in args work.
-  SourceDir root_source_dir =
-      SourceDirForCurrentDirectory(build_settings_.root_path());
-  arg_scope.set_source_dir(root_source_dir);
+  // Set source dir so relative imports in args work.
+  arg_scope.set_source_dir(args_input_file_->dir());
   args_root_->Execute(&arg_scope, err);
   if (err->has_error()) {
     return false;
@@ -729,7 +745,7 @@ bool Setup::FillArgsFromArgsInputFile(Err* err) {
   arg_scope.GetCurrentScopeValues(&overrides);
   build_settings_.build_args().AddArgOverrides(overrides);
   build_settings_.build_args().set_build_args_dependency_files(
-      arg_scope.build_dependency_files());
+      arg_scope.CollectBuildDependencyFiles());
   return true;
 }
 
@@ -921,7 +937,7 @@ bool Setup::FillPythonPath(const base::CommandLine& cmdline, Err* err) {
   if (cmdline.HasSwitch(switches::kScriptExecutable)) {
     auto script_executable =
         cmdline.GetSwitchValuePath(switches::kScriptExecutable);
-    build_settings_.set_python_path(ProcessFileExtensions(script_executable));
+    build_settings_.SetPythonPath(ProcessFileExtensions(script_executable));
   } else if (value) {
     if (!value->VerifyTypeIs(Value::STRING, err)) {
       return false;
@@ -938,7 +954,7 @@ bool Setup::FillPythonPath(const base::CommandLine& cmdline, Err* err) {
         return false;
       }
     }
-    build_settings_.set_python_path(python_path);
+    build_settings_.SetPythonPath(std::move(python_path));
   } else {
 #if defined(OS_WIN)
     base::FilePath python_path =
@@ -949,9 +965,9 @@ bool Setup::FillPythonPath(const base::CommandLine& cmdline, Err* err) {
                      "just \"python.exe\"");
       python_path = base::FilePath(u"python.exe");
     }
-    build_settings_.set_python_path(python_path);
+    build_settings_.SetPythonPath(std::move(python_path));
 #else
-    build_settings_.set_python_path(base::FilePath("python"));
+    build_settings_.SetPythonPath(base::FilePath("python"));
 #endif
   }
   return true;
@@ -1191,26 +1207,32 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline, Err* err) {
     check_system_includes_ = check_system_includes_value->boolean_value();
   }
 
-  // Fill exec_script_whitelist.
-  const Value* exec_script_whitelist_value =
-      dotfile_scope_.GetValue("exec_script_whitelist", true);
-  if (exec_script_whitelist_value) {
+  // Fill exec_script_allowlist.
+  const Value* exec_script_allowlist_value =
+      dotfile_scope_.GetValue("exec_script_allowlist", true);
+  if (!exec_script_allowlist_value) {
+    // Check for this value as well, for backwards-compatibility.
+    exec_script_allowlist_value =
+        dotfile_scope_.GetValue("exec_script_whitelist", true);
+  }
+
+  if (exec_script_allowlist_value) {
     // Fill the list of targets to check.
-    if (!exec_script_whitelist_value->VerifyTypeIs(Value::LIST, err)) {
+    if (!exec_script_allowlist_value->VerifyTypeIs(Value::LIST, err)) {
       return false;
     }
-    std::unique_ptr<SourceFileSet> whitelist =
+    std::unique_ptr<SourceFileSet> allowlist =
         std::make_unique<SourceFileSet>();
-    for (const auto& item : exec_script_whitelist_value->list_value()) {
+    for (const auto& item : exec_script_allowlist_value->list_value()) {
       if (!item.VerifyTypeIs(Value::STRING, err)) {
         return false;
       }
-      whitelist->insert(current_dir.ResolveRelativeFile(item, err));
+      allowlist->insert(current_dir.ResolveRelativeFile(item, err));
       if (err->has_error()) {
         return false;
       }
     }
-    build_settings_.set_exec_script_whitelist(std::move(whitelist));
+    build_settings_.set_exec_script_allowlist(std::move(allowlist));
   }
 
   // Fill optional default_args.
