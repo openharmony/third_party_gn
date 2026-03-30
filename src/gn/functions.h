@@ -293,6 +293,14 @@ Value RunPathExists(Scope* scope,
                     const std::vector<Value>& args,
                     Err* err);
 
+extern const char kGlobFiles[];
+extern const char kGlobFiles_HelpShort[];
+extern const char kGlobFiles_Help[];
+Value RunGlobFiles(Scope* scope,
+                    const FunctionCallNode* function,
+                    const std::vector<Value>& args,
+                    Err* err);
+
 extern const char kPool[];
 extern const char kPool_HelpShort[];
 extern const char kPool_Help[];
