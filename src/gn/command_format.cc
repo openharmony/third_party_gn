@@ -121,11 +121,11 @@ bool IsAssignment(std::string_view op) {
 }
 
 bool IsTargetsList(std::string_view ident) {
-  return ident.ends_with("deps") || ident == "visibility";
+  return base::ends_with(ident, "deps") || ident == "visibility";
 }
 
 bool IsSourcesList(std::string_view ident) {
-  return ident.ends_with("sources") || ident == "public";
+  return base::ends_with(ident, "sources") || ident == "public";
 }
 
 class Printer {
