@@ -26,6 +26,7 @@
 #include "gn/innerapis_publicinfo_generator.h"
 #include "gn/input_file.h"
 #include "gn/label_pattern.h"
+#include "gn/location.h"
 #include "gn/ohos_components_checker.h"
 #include "gn/parse_tree.h"
 #include "gn/parser.h"
@@ -1062,6 +1063,22 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline, Err* err) {
       return false;
     }
     build_settings_.set_ninja_required_version(*version);
+  }
+
+  // glob_max_results: Maximum number of files that can be returned by glob_files.
+  const Value* glob_max_results_value = 
+      dotfile_scope_.GetValue("glob_max_results", true);
+  if (glob_max_results_value) {
+    if (!glob_max_results_value->VerifyTypeIs(Value::INTEGER, err)) {
+      return false;
+    }
+    int max_results = glob_max_results_value->int_value();
+    if (max_results <= 0) {
+      Err(Location(), "Invalid glob_max_results value")
+          .PrintToStdout();
+      return false;
+    }
+    build_settings_.set_glob_max_results(max_results);
   }
 
   // Root build file.
