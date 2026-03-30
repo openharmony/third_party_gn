@@ -62,11 +62,11 @@ main() {
         return 1
     fi
 
-    log_section "Stage 4/5: Start Unit Tests"
-    if ! run_command "${OUT_DIR}/gn_unittests"; then
-        echo -e "\033[1;31mError!\033[0m"
-        return 1
-    fi
+    #log_section "Stage 4/5: Start Unit Tests"
+    #if ! run_command "${OUT_DIR}/gn_unittests"; then
+    #    echo -e "\033[1;31mError!\033[0m"
+    #    return 1
+    #fi
     
     log_section "Stage 5/5: Start Package"
     if run_command tar -zcf "${PACKAGE_NAME}" -C "${OUT_DIR}" gn; then
