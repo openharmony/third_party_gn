@@ -94,7 +94,7 @@ class File {
     ~Info();
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
     // Fills this struct with values from |stat_info|.
-    void FromStat(const stat_wrapper_t& stat_info);
+    void FromStat(const struct stat& stat_info);
 #endif
 
     // The size of the file in bytes.  Undefined when is_directory is true.

@@ -8,6 +8,15 @@
 
 ResolvedTargetData::TargetInfo* ResolvedTargetData::GetTargetInfo(
     const Target* target) const {
+  {
+    std::shared_lock<std::shared_mutex> lock(map_mutex_);
+    size_t index = targets_.IndexOf(target);
+    if (index != UniqueVector<const Target*>::kIndexNone) {
+      return infos_[index].get();
+    }
+  }
+
+  std::unique_lock<std::shared_mutex> lock(map_mutex_);
   auto ret = targets_.PushBackWithIndex(target);
   if (ret.first) {
     infos_.push_back(std::make_unique<TargetInfo>(target));
@@ -41,12 +50,14 @@ void ResolvedTargetData::ComputeFrameworkInfo(TargetInfo* info) const {
   UniqueVector<SourceDir> all_framework_dirs;
   UniqueVector<std::string> all_frameworks;
   UniqueVector<std::string> all_weak_frameworks;
+  UniqueVector<std::string> all_weak_libraries;
 
   for (ConfigValuesIterator iter(info->target); !iter.done(); iter.Next()) {
     const ConfigValues& cur = iter.cur();
     all_framework_dirs.Append(cur.framework_dirs());
     all_frameworks.Append(cur.frameworks());
     all_weak_frameworks.Append(cur.weak_frameworks());
+    all_weak_libraries.Append(cur.weak_libraries());
   }
   for (const Target* dep : info->deps.linked_deps()) {
     if (!dep->IsFinal() || dep->output_type() == Target::STATIC_LIBRARY) {
@@ -54,12 +65,14 @@ void ResolvedTargetData::ComputeFrameworkInfo(TargetInfo* info) const {
       all_framework_dirs.Append(dep_info->framework_dirs);
       all_frameworks.Append(dep_info->frameworks);
       all_weak_frameworks.Append(dep_info->weak_frameworks);
+      all_weak_libraries.Append(dep_info->weak_libraries);
     }
   }
 
   info->framework_dirs = all_framework_dirs.release();
   info->frameworks = all_frameworks.release();
   info->weak_frameworks = all_weak_frameworks.release();
+  info->weak_libraries = all_weak_libraries.release();
   info->has_framework_info = true;
 }
 
@@ -109,7 +122,7 @@ void ResolvedTargetData::ComputeInheritedLibsFor(
     if (dep->output_type() == Target::STATIC_LIBRARY ||
         dep->output_type() == Target::SHARED_LIBRARY ||
         dep->output_type() == Target::RUST_LIBRARY ||
-        dep->output_type() == Target::SOURCE_SET || 
+        dep->output_type() == Target::SOURCE_SET ||
         dep->copy_linkable_file() ||
         (dep->output_type() == Target::CREATE_BUNDLE &&
          dep->bundle_data().is_framework())) {
@@ -170,6 +183,40 @@ void ResolvedTargetData::ComputeInheritedLibsFor(
         if (pair.target()->IsFinal())
           inherited_libraries->Append(pair.target(),
                                       is_public && pair.is_public());
+      }
+    }
+  }
+}
+
+void ResolvedTargetData::ComputeModuleDepsInformation(TargetInfo* info) const {
+  TargetPublicPairListBuilder module_deps_information;
+
+  ComputeModuleDepsInformationFor(info->deps.public_deps(), true,
+                                  &module_deps_information);
+  ComputeModuleDepsInformationFor(info->deps.private_deps(), false,
+                                  &module_deps_information);
+
+  info->module_deps_information = module_deps_information.Build();
+  info->has_module_deps_information = true;
+}
+
+void ResolvedTargetData::ComputeModuleDepsInformationFor(
+    base::span<const Target*> deps,
+    bool is_public,
+    TargetPublicPairListBuilder* module_deps_information) const {
+  for (const Target* dep : deps) {
+    if (dep->output_type() != Target::STATIC_LIBRARY &&
+        dep->output_type() != Target::SHARED_LIBRARY &&
+        dep->output_type() != Target::SOURCE_SET &&
+        dep->output_type() != Target::GROUP) {
+      continue;
+    }
+
+    module_deps_information->Append(dep, is_public);
+    const TargetInfo* dep_info = GetTargetModuleDepsInformation(dep);
+    for (const auto& pair : dep_info->module_deps_information) {
+      if (pair.is_public()) {
+        module_deps_information->Append(pair.target(), is_public);
       }
     }
   }
@@ -266,3 +313,4 @@ void ResolvedTargetData::ComputeSwiftValues(TargetInfo* info) const {
   }
   info->has_swift_values = true;
 }
+

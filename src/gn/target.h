@@ -7,6 +7,7 @@
 
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
@@ -285,6 +286,10 @@ class Target : public Item {
   const LabelTargetVector& data_deps() const { return data_deps_; }
   LabelTargetVector& data_deps() { return data_deps_; }
 
+  // Validation dependencies.
+  const LabelTargetVector& validations() const { return validations_; }
+  LabelTargetVector& validations() { return validations_; }
+
   // gen_deps only propagate the "should_generate" flag. These dependencies can
   // have cycles so care should be taken if iterating over them recursively.
   const LabelTargetVector& gen_deps() const { return gen_deps_; }
@@ -416,7 +421,7 @@ class Target : public Item {
   // action or a copy step, and the output library or executable file(s) from
   // binary targets.
   //
-  // It will NOT include stamp files and object files.
+  // It will NOT include phony targets or object files.
   const std::vector<OutputFile>& computed_outputs() const {
     return computed_outputs_;
   }
@@ -429,19 +434,65 @@ class Target : public Item {
   // a dependency on this one. It could be the same as the link output file
   // (this will be the case for static libraries). For shared libraries it
   // could be the same or different than the link output file, depending on the
-  // system. For actions this will be the stamp file.
+  // system.
+  //
+  // The dependency output alias is only set when the target does not have an
+  // output file and is using a Ninja phony target to represent it. The
+  // exception to this is for phony targets without any real inputs. Ninja
+  // treats empty phony targets as always dirty, so no other targets should
+  // depend on that target. In that scenario, both dependency_output_alias or
+  // dependency_output_file will be empty.
+  //
+  // Callers that do not care whether the dependency is represented by a file or
+  // an alias should use dependency_output().
   //
   // These are only known once the target is resolved and will be empty before
   // that. This is a cache of the files to prevent every target that depends on
   // a given library from recomputing the same pattern.
   const OutputFile& link_output_file() const { return link_output_file_; }
+
+  // Returns true if there is an output dependency file or phony alias.
+  bool has_dependency_output() const {
+    return has_dependency_output_file() || has_dependency_output_alias();
+  }
+  // Return the output dependency file path or phony alias if one is defined,
+  // or an empty string otherwise.
+  const OutputFile& dependency_output() const {
+    return has_dependency_output_file() ? dependency_output_file_
+                                        : dependency_output_alias_;
+  }
+
+  // Return true if there is a dependency file path defined for this target.
+  bool has_dependency_output_file() const {
+    return !dependency_output_file_.value().empty();
+  }
+  // Return the dependency output file path for this target if defined, or
+  // an empty string otherwise.
   const OutputFile& dependency_output_file() const {
     return dependency_output_file_;
+  }
+
+  // Return true if there is a dependency output alias defined for this target.
+  bool has_dependency_output_alias() const {
+    return !dependency_output_alias_.value().empty();
+  }
+  // Return the dependency output alias if any, or an empty string otherwise.
+  const OutputFile& dependency_output_alias() const {
+    return dependency_output_alias_;
   }
 
   // The subset of computed_outputs that are considered runtime outputs.
   const std::vector<OutputFile>& runtime_outputs() const {
     return runtime_outputs_;
+  }
+
+  // The module name for the target.
+  std::string module_name() const {
+    return module_name_override_.empty() ? label().name()
+                                         : module_name_override_;
+  }
+  void set_module_name(std::string module_name) {
+    module_name_override_ = std::move(module_name);
   }
 
   // Computes and returns the outputs of this target expressed as SourceFiles.
@@ -489,6 +540,7 @@ class Target : public Item {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(TargetTest, ResolvePrecompiledHeaders);
+  FRIEND_TEST_ALL_PREFIXES(TargetTest, HasRealInputs);
 
   // Pulls necessary information from dependencies to this one when all
   // dependencies have been resolved.
@@ -497,6 +549,11 @@ class Target : public Item {
   void PullDependentTargetLibs();
   void PullRecursiveHardDeps();
   void PullRecursiveBundleData();
+
+  // Checks to see whether this target or any of its dependencies have real
+  // inputs. If not, this target should be omitted as a dependency. This check
+  // only applies to targets that will result in a phony rule.
+  bool HasRealInputs() const;
 
   // Fills the link and dependency output files when a target is resolved.
   bool FillOutputFiles(Err* err);
@@ -511,7 +568,6 @@ class Target : public Item {
   bool CheckTestonly(Err* err) const;
   bool CheckAssertNoDeps(Err* err) const;
   void CheckSourcesGenerated() const;
-  void CheckSourceGenerated(const SourceFile& source) const;
   bool CheckSourceSetLanguages(Err* err) const;
 
   OutputType output_type_ = UNKNOWN;
@@ -521,6 +577,7 @@ class Target : public Item {
   std::string output_extension_;
   bool output_extension_set_ = false;
 
+  std::string module_name_override_;
   FileList sources_;
   std::vector<SourceDir> include_dirs_;
   SourceFileTypeSet source_types_used_;
@@ -538,6 +595,7 @@ class Target : public Item {
   LabelTargetVector private_deps_;
   LabelTargetVector public_deps_;
   LabelTargetVector data_deps_;
+  LabelTargetVector validations_;
   LabelTargetVector gen_deps_;
 
   // See getters for more info.
@@ -609,6 +667,7 @@ class Target : public Item {
   std::vector<OutputFile> computed_outputs_;
   OutputFile link_output_file_;
   OutputFile dependency_output_file_;
+  OutputFile dependency_output_alias_;
   std::vector<OutputFile> runtime_outputs_;
 
   std::unique_ptr<Metadata> metadata_;
