@@ -12,6 +12,11 @@
 #include <unistd.h>
 #endif
 
+#if defined(OS_MACOSX)
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#endif
+
 #if defined(OS_WIN)
 #include <windows.h>
 #include "base/win/registry.h"
@@ -35,7 +40,8 @@ bool IsLongPathsSupportEnabled() {
 
       // If the ntdll approach failed, the registry approach is still reliable,
       // because the manifest should've always be linked with gn.exe in Windows.
-      const char16_t key_name[] = uR"(SYSTEM\CurrentControlSet\Control\FileSystem)";
+      const char16_t key_name[] =
+          uR"(SYSTEM\CurrentControlSet\Control\FileSystem)";
       const char16_t value_name[] = u"LongPathsEnabled";
 
       base::win::RegKey key(HKEY_LOCAL_MACHINE, key_name, KEY_READ);
@@ -133,4 +139,22 @@ int NumberOfProcessors() {
 #else
 #error
 #endif
+}
+
+int NumberOfPerformanceProcessors() {
+#if defined(OS_MACOSX) && defined(ARCH_CPU_ARM64)
+  int nperflevels;
+  size_t len = sizeof(nperflevels);
+  if (sysctlbyname("hw.nperflevels", &nperflevels, &len, nullptr, 0) == 0) {
+    if (nperflevels > 0) {
+      int perflevel0_cores;
+      len = sizeof(perflevel0_cores);
+      if (sysctlbyname("hw.perflevel0.physicalcpu", &perflevel0_cores, &len,
+                       nullptr, 0) == 0) {
+        return perflevel0_cores;
+      }
+    }
+  }
+#endif
+  return NumberOfProcessors();
 }

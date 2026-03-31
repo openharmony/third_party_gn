@@ -6,6 +6,7 @@
 #define INNERAPIS_PUBLICINFO_GENERATOR_H_
 
 #include <iostream>
+#include <mutex>
 
 #include "gn/build_settings.h"
 #include "gn/config.h"
@@ -36,6 +37,7 @@ public:
 
     static void Init(const std::string &build_dir, int checkType)
     {
+        std::lock_guard<std::mutex> lock(instanceMutex_);
         if (instance_ != nullptr) {
             return;
         }
@@ -47,6 +49,7 @@ private:
     std::string build_dir_;
     int checkType_ = OhosComponentChecker::CheckType::NONE;
     static InnerApiPublicInfoGenerator *instance_;
+    static std::mutex instanceMutex_;  // 保护单例初始化的互斥锁
     void DoGeneratedInnerapiPublicInfo(const Target *target, const OhosComponentChecker *checker, Err *err);
     InnerApiPublicInfoGenerator(const std::string &build_dir, int checkType)
     {
