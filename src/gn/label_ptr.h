@@ -30,7 +30,7 @@ struct LabelPtrPair {
 
   // This constructor is typically used in unit tests, it extracts the label
   // automatically from a given pointer.
-  explicit LabelPtrPair(const T* p) : label(p->label()), is_external_deps(false) {}
+  explicit LabelPtrPair(const T* p) : label(p->label()), is_external_deps(false), ptr(p) {}
 
   ~LabelPtrPair() = default;
 

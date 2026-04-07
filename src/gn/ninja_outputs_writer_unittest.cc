@@ -147,16 +147,14 @@ group("zoo") {
   std::string expected = R"##({
   "//:bar": [
     "bar.output",
-    "obj/bar.stamp"
+    "phony/bar"
   ],
   "//:foo": [
-    "obj/foo.stamp"
+    "phony/foo"
   ],
   "//:zoo": [
-    "obj/zoo.stamp"
   ],
   "//:zoo(//toolchain:secondary)": [
-    "secondary/obj/zoo.stamp"
   ]
 })##";
 
