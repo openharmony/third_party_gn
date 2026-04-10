@@ -311,99 +311,93 @@ bool TargetGenerator::FillDependencies() {
     &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
     return false;
   if (scope_->settings()->build_settings()->is_ohos_components_enabled()) {
+    auto* checker = OhosComponentChecker::getInstance();
+    const bool need_whitelist_check = checker && checker->GetCheckType() == OhosComponentChecker::INTERCEPT_ALL;
+
+    // 处理 external_deps
     if (!FillOhosComponentDeps(variables::kExternalDeps, &target_->private_deps(),
-        &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
+      &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
       return false;
 
-    // 检查 public_external_deps
-    OhosComponentChecker* checker = OhosComponentChecker::getInstance();
+    // 处理 public_external_deps
     const Value* public_external_deps_value = scope_->GetValue(variables::kPublicExternalDeps, true);
-    const bool kNeedWhitelistCheck = checker && checker->GetCheckType() == OhosComponentChecker::INTERCEPT_ALL;
-    if (kNeedWhitelistCheck && (public_external_deps_value && !public_external_deps_value->list_value().empty())) {
-      // 检查是否在 public_deps 白名单中
-      std::string label = target_->label().GetUserVisibleName(false);
+    if (public_external_deps_value && !public_external_deps_value->list_value().empty()) {
+      const bool whitelist_debug = checker && checker->IsWhitelistDebug();
 
-      // 检查是否启用白名单调试模式
-      bool whitelistDebug = (checker && checker->IsWhitelistDebug());
+      // 用于收集不在白名单中的依赖标签（显示用）
+      std::vector<std::string> blocked_deps;
 
-      // 遍历所有 public_external_deps,检查是否都在白名单中
-      bool all_whitelisted = true;
-      for (const auto& dep_value : public_external_deps_value->list_value()) {
-        if (dep_value.type() != Value::STRING) {
-          continue;
-        }
-        std::string dep = dep_value.string_value();
+      // 如果需要进行白名单检查（非调试模式或调试模式但需要收集）
+      if (need_whitelist_check || whitelist_debug) {
+        std::string target_label = target_->label().GetUserVisibleName(false);
+        const BuildSettings* build_settings = GetBuildSettings();
+        const Label& toolchain_label = ToolchainLabelForScope(scope_);
 
-        // 转换 external_deps 为绝对路径 label
-        std::string resolved_label;
-        int whole_status = 0;
-        Err dummy_err;
+        for (const auto& dep_value : public_external_deps_value->list_value()) {
+          if (dep_value.type() != Value::STRING)
+            continue;
 
-        // 首先获取带 toolchain 的完整标签（用于打印调试信息）
-        std::string label_for_display;
-        bool convert_success = GetBuildSettings()->GetExternalDepsLabel(dep_value, label_for_display,
-            ToolchainLabelForScope(scope_), whole_status, &dummy_err, false);
-
-        // 同时获取去除 toolchain 的标签（用于白名单检查和收集）
-        std::string label_for_whitelist;
-        if (convert_success) {
-            convert_success = GetBuildSettings()->GetExternalDepsLabel(dep_value, label_for_whitelist,
-                ToolchainLabelForScope(scope_), whole_status, &dummy_err, true);
-        }
-
-        if (convert_success) {
-          if (!OhosComponentChecker::IsPublicDepsWhitelisted(label, label_for_whitelist)) {
-            all_whitelisted = false;
-            // 白名单调试模式: 打印被拦截的依赖(显示转换后的绝对路径)，并收集到拦截清单
-            if (whitelistDebug) {
-              OhosComponentChecker::getInstance()->AddToInterceptedList("public_deps", label, label_for_whitelist);
-              std::cerr << "[WHITELIST DEBUG] public_external_deps blocked: "
-                       << label << " -> " << label_for_display << std::endl;
+          // 尝试解析为规范标签（去除 toolchain）
+          std::string canonical_label;
+          int whole_status = 0;
+          Err dummy_err;
+          bool convert_success = build_settings->GetExternalDepsLabel(
+              dep_value, canonical_label, toolchain_label, whole_status,
+              &dummy_err, true);  // true: 去除 toolchain
+          if (convert_success) {
+            if (!OhosComponentChecker::IsPublicDepsWhitelisted(target_label, canonical_label)) {
+              blocked_deps.push_back(canonical_label);
+              // 调试模式下同时打印拦截信息
+              if (whitelist_debug) {
+                checker->AddToInterceptedList("public_deps", target_label, canonical_label);
+                std::string display_label;
+                build_settings->GetExternalDepsLabel(
+                    dep_value, display_label, toolchain_label, whole_status,
+                    &dummy_err, false);  // 获取带 toolchain 的显示标签
+                std::cerr << "[WHITELIST DEBUG] public_external_deps blocked: "
+                          << target_label << " -> " << display_label
+                          << std::endl;
+              }
             }
-          }
-        } else {
-          // 转换失败,使用原始值
-          std::string dep_for_whitelist = dep;
-          size_t toolchain_pos = dep_for_whitelist.find("(");
-          if (toolchain_pos != std::string::npos) {
-            dep_for_whitelist = dep_for_whitelist.substr(0, toolchain_pos);
-          }
-
-          if (!OhosComponentChecker::IsPublicDepsWhitelisted(label, dep_for_whitelist)) {
-            all_whitelisted = false;
-            // 白名单调试模式: 打印被拦截的依赖，并收集到拦截清单
-            if (whitelistDebug) {
-              OhosComponentChecker::getInstance()->AddToInterceptedList("public_deps", label, dep_for_whitelist);
-              std::cerr << "[WHITELIST DEBUG] public_external_deps blocked: "
-                       << label << " -> " << dep << std::endl;
+          } else {
+            // 转换失败：回退到原始字符串，去除可能的 toolchain 后缀
+            std::string raw = dep_value.string_value();
+            size_t toolchain_pos = raw.find("(");
+            std::string fallback = (toolchain_pos != std::string::npos)
+                                       ? raw.substr(0, toolchain_pos)
+                                       : raw;
+            if (!OhosComponentChecker::IsPublicDepsWhitelisted(target_label, fallback)) {
+              blocked_deps.push_back(fallback);
+              if (whitelist_debug) {
+                checker->AddToInterceptedList("public_deps", target_label, fallback);
+                std::cerr << "[WHITELIST DEBUG] public_external_deps blocked: "
+                          << target_label << " -> " << raw << std::endl;
+              }
             }
           }
         }
       }
 
-      if (all_whitelisted || whitelistDebug) {
-        // 在白名单中，保持原来的逻辑：执行 public_external_deps
-        if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps(),
-            &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
-          return false;
-      } else {
-        // 不在白名单中且非调试模式：报错禁止使用
-        *err_ = Err(public_external_deps_value->origin(),
-            "public_external_deps is not allowed.",
+      // 决定是否执行实际填充
+      if (need_whitelist_check && !whitelist_debug && !blocked_deps.empty()) {
+        // 非调试模式且有不在白名单中的依赖：报错并终止，只显示第一个依赖
+        std::string error_msg =
+            "\nThe item " + target_->label().GetUserVisibleName(false) +
+            " is not allowed to use public_external_deps on " + blocked_deps[0] + "\n"
             "The use of public_external_deps has been disabled.\n"
             "For cross-component dependencies, please use external_deps.\n"
             "For intra-component dependencies, please use public_deps.\n"
-            "To whitelist this target, add it to 'public_deps'\n"
-            "in component_compilation_whitelist.json.");
+            "To whitelist this target, add it to 'public_deps' in "
+            "component_compilation_whitelist.json.";
+        *err_ = Err(public_external_deps_value->origin(), error_msg);
         return false;
       }
-      // 调试模式下不在白名单中: 只打印(已在上面打印),不中断流程
-    } else {
-        // 在白名单中，保持原来的逻辑：执行 public_external_deps
-        if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps(),
-            &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
-          return false;
-    } 
+
+      // 调试模式或没有不在白名单的依赖：填充 public_external_deps
+      if (!FillOhosComponentDeps(variables::kPublicExternalDeps, &target_->public_deps(),
+        &target_->whole_archive_deps(), &target_->no_whole_archive_deps()))
+        return false;
+    }
   }
   if (!FillGenericDeps(variables::kDataDeps, &target_->data_deps()))
     return false;
