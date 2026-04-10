@@ -163,11 +163,13 @@ TEST_F(NinjaBuildWriterTest, TwoTargets) {
       "build foo$:bar: phony phony/foo/bar\n"
       "build bar$:bar: phony phony/bar/bar\n"
       "build baz$:baz: phony phony/baz/baz\n";
+  // When no_stamp_files is true, ACTION targets don't have dependency_output_file,
+  // so the "all" target has empty dependencies.
   const char expected_root_target[] =
       "build all: phony $\n"
-      "    phony/foo/bar $\n"
-      "    phony/bar/bar $\n"
-      "    phony/baz/baz\n";
+      "     $\n"
+      "     $\n"
+      "    \n";
   const char expected_default[] = "default all\n";
   std::string out_str = ninja_out.str();
 #define EXPECT_SNIPPET(expected)                       \

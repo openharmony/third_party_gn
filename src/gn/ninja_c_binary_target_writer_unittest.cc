@@ -415,12 +415,12 @@ TEST_F(NinjaCBinaryTargetWriterTest, NoHardDepsToNoPublicHeaderTarget) {
       "target_out_dir = obj/foo\n"
       "target_output_name = gen_obj\n"
       "\n"
-      "build obj/BUILD_DIR/gen_obj.generated.o: cxx generated.cc"
+      "build obj/out/Debug/gen_obj.generated.o: cxx generated.cc"
       " || phony/foo/generate\n"
       "  source_file_part = generated.cc\n"
       "  source_name_part = generated\n"
       "\n"
-      "build phony/foo/gen_obj: phony obj/BUILD_DIR/gen_obj.generated.o"
+      "build phony/foo/gen_obj: phony obj/out/Debug/gen_obj.generated.o"
       // The order-only dependency here is strictly unnecessary since the
       // sources list this as an order-only dep.
       " || phony/foo/generate\n";
@@ -453,7 +453,7 @@ TEST_F(NinjaCBinaryTargetWriterTest, NoHardDepsToNoPublicHeaderTarget) {
       "target_output_name = libgen_lib\n"
       "\n"
       "\n"
-      "build ./libgen_lib.so: solink obj/BUILD_DIR/gen_obj.generated.o"
+      "build ./libgen_lib.so: solink obj/out/Debug/gen_obj.generated.o"
       // The order-only dependency here is strictly unnecessary since
       // obj/out/Debug/gen_obj.generated.o has dependency to
       // obj/foo/gen_obj.stamp
