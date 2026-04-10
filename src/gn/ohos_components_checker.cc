@@ -837,6 +837,18 @@ bool OhosComponentChecker::CheckPublicDeps(const Target *target, const std::stri
 
         const OhosComponent *from_component = target->ohos_component();
 
+        bool is_same_part = false;
+        for (const auto &path : from_component->modulePath()) {
+            if (StartWith(deps, path)) {
+                is_same_part = true;
+                break;
+            }
+        }
+
+        if (is_same_part || IsPublicDepsWhitelisted(label, deps)) {
+            return true;
+        }
+
         if (checkType_ >= CheckType::INTERCEPT_IGNORE_TEST) {
             return InterceptPublicDeps(target, label, deps, from_component, err);
         }
