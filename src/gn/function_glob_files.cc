@@ -40,6 +40,12 @@ bool ParseArguments(const std::vector<Value>& args,
     return false;
   }
 
+  if (root_value.string_value().empty()) {
+    *err = Err(function->function(), "Empty path.",
+               "glob_files: The root path cannot be empty.");
+    return false;
+  }
+
   allow_empty = false;
   if (args.size() == 2) {
     const Value& allow_empty_value = args[1];
@@ -51,18 +57,25 @@ bool ParseArguments(const std::vector<Value>& args,
   return true;
 }
 
-// Helper function to check if a path points to a file and resolve it
+// Helper function to check if a path points to a file and resolve it.
+// Returns true if it's a file, false if it's a directory or doesn't exist.
 bool ResolveAndCheckFile(Scope* scope,
                          const Value& root_value,
                          const std::string& source_root_path,
                          base::FilePath* system_path,
                          Err* err) {
-  const SourceDir& cur_dir = scope->GetSourceDir();
-  Err file_err;
-  SourceFile resolved_file =
-      cur_dir.ResolveRelativeFile(root_value, &file_err, source_root_path);
+  const std::string& input_string = root_value.string_value();
+  // Paths ending with '/' are valid directories; skip ResolveRelativeFile
+  // which would treat them as errors since it expects a file path.
+  if (!input_string.empty() && input_string.back() == '/') {
+    return false;
+  }
 
-  if (file_err.has_error()) {
+  const SourceDir& cur_dir = scope->GetSourceDir();
+  SourceFile resolved_file =
+      cur_dir.ResolveRelativeFile(root_value, err, source_root_path);
+
+  if (err->has_error()) {
     return false;
   }
 
