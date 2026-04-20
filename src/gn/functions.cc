@@ -1563,6 +1563,7 @@ struct FunctionInfoInitializer {
     INSERT_FUNCTION(Len, false)
     INSERT_FUNCTION(NotNeeded, false)
     INSERT_FUNCTION(PathExists, false)
+    INSERT_FUNCTION(GlobFiles, false)
     INSERT_FUNCTION(Pool, false)
     INSERT_FUNCTION(Print, false)
     INSERT_FUNCTION(PrintStackTrace, false)
