@@ -92,6 +92,14 @@ class BuildSettings {
     no_stamp_files_ = no_stamp_files;
   }
 
+  // The maximum number of files that can be returned by glob_files.
+  // This is a global limit to prevent performance issue when globbing
+  // large directories. The default is 5000.
+  int glob_max_results() const { return glob_max_results_; }
+  void set_glob_max_results(int max_results) {
+    glob_max_results_ = max_results;
+  }
+
   const SourceFile& build_config_file() const { return build_config_file_; }
   void set_build_config_file(const SourceFile& f) { build_config_file_ = f; }
 
@@ -182,6 +190,7 @@ private:
   // See 40045b9 for the reason behind using 1.7.2 as the default version.
   Version ninja_required_version_{1, 7, 2};
   bool no_stamp_files_ = true;
+  int glob_max_results_ = 5000;
 
   SourceFile build_config_file_;
   SourceFile arg_file_template_path_;

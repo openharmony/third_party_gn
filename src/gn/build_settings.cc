@@ -19,6 +19,7 @@ BuildSettings::BuildSettings(const BuildSettings& other)
       secondary_source_path_(other.secondary_source_path_),
       python_path_(other.python_path_),
       ninja_required_version_(other.ninja_required_version_),
+      glob_max_results_(other.glob_max_results_),
       build_config_file_(other.build_config_file_),
       arg_file_template_path_(other.arg_file_template_path_),
       build_dir_(other.build_dir_),
