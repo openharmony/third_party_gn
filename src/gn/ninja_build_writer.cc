@@ -663,8 +663,10 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
     EscapeOptions ninja_escape;
     ninja_escape.mode = ESCAPE_NINJA;
     for (const Target* target : default_toolchain_targets_) {
-      out_ << " $\n    ";
-      path_output_.WriteFile(out_, target->dependency_output_file());
+      if (target->has_dependency_output()) {
+        out_ << " $\n    ";
+        path_output_.WriteFile(out_, target->dependency_output());
+      }
     }
   }
   out_ << std::endl;
@@ -675,7 +677,7 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
       out_ << "\ndefault default" << std::endl;
     } else {
       out_ << "\ndefault ";
-      path_output_.WriteFile(out_, default_target->dependency_output_file());
+      path_output_.WriteFile(out_, default_target->dependency_output());
       out_ << std::endl;
     }
   } else if (!default_toolchain_targets_.empty()) {
@@ -696,13 +698,15 @@ void NinjaBuildWriter::WritePhonyRule(const Target* target,
   // Escape for special chars Ninja will handle.
   std::string escaped = EscapeString(phony_name, ninja_escape, nullptr);
 
-  // If the target doesn't have a dependency_output(), we should
-  // still emit the phony rule, but with no dependencies. This allows users to
-  // continue to use the phony rule, but it will effectively be a no-op.
-  out_ << "build " << escaped << ": phony ";
-  if (target->has_dependency_output()) {
-    path_output_.WriteFile(out_, target->dependency_output());
+  // If the target doesn't have a dependency_output(), skip writing the phony
+  // rule. Targets without dependency outputs (e.g., phony targets with no
+  // real inputs when no_stamp_files is enabled) cannot have phony rules.
+  if (!target->has_dependency_output()) {
+    return;
   }
+
+  out_ << "build " << escaped << ": phony ";
+  path_output_.WriteFile(out_, target->dependency_output());
   out_ << std::endl;
 }
 
@@ -753,4 +757,5 @@ void NinjaBuildWriter::WritePreciseTarget() {
     out_ << std::endl;
   }
 }
+
 
