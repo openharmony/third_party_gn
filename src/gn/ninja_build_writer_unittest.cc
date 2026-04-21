@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <fstream>
+#include <iostream>
 #include <sstream>
 
 #include "base/command_line.h"
@@ -163,13 +164,14 @@ TEST_F(NinjaBuildWriterTest, TwoTargets) {
       "build foo$:bar: phony phony/foo/bar\n"
       "build bar$:bar: phony phony/bar/bar\n"
       "build baz$:baz: phony phony/baz/baz\n";
-  // When no_stamp_files is true, ACTION targets don't have dependency_output_file,
-  // so the "all" target has empty dependencies.
+  // When no_stamp_files is true, ACTION targets have dependency_output_alias
+  // instead of dependency_output_file, so the "all" target includes the phony
+  // dependencies.
   const char expected_root_target[] =
       "build all: phony $\n"
-      "     $\n"
-      "     $\n"
-      "    \n";
+      "    phony/foo/bar $\n"
+      "    phony/bar/bar $\n"
+      "    phony/baz/baz\n";
   const char expected_default[] = "default all\n";
   std::string out_str = ninja_out.str();
 #define EXPECT_SNIPPET(expected)                       \
@@ -341,3 +343,4 @@ TEST_F(NinjaBuildWriterTest, DuplicateOutputs) {
 
   EXPECT_EQ(expected_help_test, err.help_text());
 }
+
