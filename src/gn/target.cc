@@ -1107,7 +1107,27 @@ bool Target::FillOutputFiles(Err* err) {
     case COPY_FILES:
     case CREATE_BUNDLE:
     case GENERATED_FILE:
-    case GROUP:
+    case GROUP: {
+      // Group targets should always have a dependency_output_alias in
+      // no_stamp_files mode, even if they have no real inputs, so they can
+      // be used as dependency aliases.
+      if (settings()->build_settings()->no_stamp_files()) {
+        dependency_output_alias_ =
+            GetBuildDirForTargetAsOutputFile(this, BuildDirType::PHONY);
+        dependency_output_alias_.value().append(label().name());
+      } else {
+        // These don't get linked to and use stamps which should be the first
+        // entry in the outputs. These stamps are named
+        // "<target_out_dir>/<targetname>.stamp". Setting "output_name" does not
+        // affect the stamp file name: it is always based on the original target
+        // name.
+        dependency_output_file_ =
+            GetBuildDirForTargetAsOutputFile(this, BuildDirType::OBJ);
+        dependency_output_file_.value().append(label().name());
+        dependency_output_file_.value().append(".stamp");
+      }
+      break;
+    }
     case SOURCE_SET: {
       if (settings()->build_settings()->no_stamp_files()) {
         if (HasRealInputs()) {
@@ -1535,3 +1555,4 @@ bool Target::GetMetadata(const std::vector<std::string>& keys_to_extract,
                  std::make_move_iterator(current_result.end()));
   return true;
 }
+

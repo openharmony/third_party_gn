@@ -153,10 +153,13 @@ group("zoo") {
     "phony/foo"
   ],
   "//:zoo": [
+    "phony/zoo"
   ],
   "//:zoo(//toolchain:secondary)": [
+    "secondary/phony/zoo"
   ]
 })##";
 
   EXPECT_EQ(generated, expected) << generated << "\n" << expected;
 }
+
