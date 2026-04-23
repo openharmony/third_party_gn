@@ -77,7 +77,8 @@ TEST_F(NinjaBinaryTargetWriterTest, NoSourcesSourceSet) {
       "target_out_dir = obj/foo\n"
       "target_output_name = bar\n"
       "\n"
-      "\n";
+      "\n"
+      "build phony/foo/bar: phony\n";
   std::string out_str = out.str();
   EXPECT_EQ(expected, out_str) << expected << "\n" << out_str;
 }
@@ -195,3 +196,4 @@ TEST_F(NinjaBinaryTargetWriterTest, Inputs) {
     EXPECT_EQ(expected, out_str) << expected << "\n" << out_str;
   }
 }
+
