@@ -130,7 +130,7 @@ group("zoo") {
       setup.DoSetup(FilePathToUTF8(build_temp_dir.GetPath()), true, cmdline));
 
   TargetWriteInfo write_info;
-
+  setup.build_settings().set_no_stamp_files(true);
   setup.builder().set_resolved_and_generated_callback(
       [&write_info](const BuilderRecord* record) {
         ItemResolvedAndGeneratedCallback(&write_info, record);
@@ -153,10 +153,13 @@ group("zoo") {
     "phony/foo"
   ],
   "//:zoo": [
+    "phony/zoo"
   ],
   "//:zoo(//toolchain:secondary)": [
+    "secondary/phony/zoo"
   ]
 })##";
 
   EXPECT_EQ(generated, expected) << generated << "\n" << expected;
 }
+
