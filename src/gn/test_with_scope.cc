@@ -28,7 +28,8 @@ TestWithScope::TestWithScope()
       scope_progammatic_provider_(&scope_, true) {
   build_settings_.set_print_callback(
       [this](const std::string& str) { AppendPrintOutput(str); });
-
+  
+  build_settings_.set_no_stamp_files(true);
   settings_.set_toolchain_label(toolchain_.label());
   settings_.set_default_toolchain_label(toolchain_.label());
 

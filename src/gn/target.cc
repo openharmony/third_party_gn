@@ -1110,7 +1110,8 @@ bool Target::FillOutputFiles(Err* err) {
     case GROUP:
     case SOURCE_SET: {
       if (settings()->build_settings()->no_stamp_files()) {
-        if (HasRealInputs()) {
+        if (HasRealInputs() || output_type_ == GROUP ||
+            output_type_ == SOURCE_SET) {
           dependency_output_alias_ =
               GetBuildDirForTargetAsOutputFile(this, BuildDirType::PHONY);
           dependency_output_alias_.value().append(label().name());
@@ -1535,3 +1536,4 @@ bool Target::GetMetadata(const std::vector<std::string>& keys_to_extract,
                  std::make_move_iterator(current_result.end()));
   return true;
 }
+

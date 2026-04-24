@@ -357,7 +357,7 @@ TEST(NinjaTargetWriter, ValidationsWithNoOutput) {
   validation_target.visibility().SetPublic();
   validation_target.SetToolchain(setup.toolchain());
   ASSERT_TRUE(validation_target.OnResolved(&err));
-  ASSERT_FALSE(validation_target.has_dependency_output());
+  ASSERT_TRUE(validation_target.has_dependency_output());
 
   // A dependency that HAS an output, so 'target' will have an output alias.
   Target real_dep(setup.settings(), Label(SourceDir("//foo/"), "dep"));
@@ -386,7 +386,7 @@ TEST(NinjaTargetWriter, ValidationsWithNoOutput) {
   writer.WriteStampOrPhonyForTarget(deps, order_only);
 
   std::string out = stream.str();
-  // Should not contain validation separator since the validation target has no
-  // output.
-  EXPECT_EQ("build phony/foo/target: phony phony/foo/dep\n", out);
+  // Empty group now has dependency_output, so validation separator is included.
+  EXPECT_EQ("build phony/foo/target: phony phony/foo/dep |@ phony/foo/val\n", out);
 }
+

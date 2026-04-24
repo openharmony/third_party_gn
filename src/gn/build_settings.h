@@ -189,7 +189,7 @@ private:
 
   // See 40045b9 for the reason behind using 1.7.2 as the default version.
   Version ninja_required_version_{1, 7, 2};
-  bool no_stamp_files_ = true;
+  bool no_stamp_files_ = false;
   int glob_max_results_ = 5000;
 
   SourceFile build_config_file_;
