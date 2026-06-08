@@ -1226,6 +1226,10 @@ void LiteralNode::ShortenTarget() {
   size_t last_slash = str.rfind('/');
   if (last_slash != std::string::npos) {
     str = str.substr(last_slash + 1);
+  } else if (category == DEPS_CATEGORY_RELATIVE) {
+    // Without a slash, strings like "aaa:aaa" are not GN label patterns that
+    // warrant shortening.
+    return;
   }
 
   // Split on the last colon.
